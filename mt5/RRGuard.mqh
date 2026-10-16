@@ -2,17 +2,6 @@
 #ifndef PSRR_GUARD_MQH
 #define PSRR_GUARD_MQH
 
-enum RG_POSITION_SCOPE
-{
-    RG_OWN_MAGIC = 0, // 本 EA 的 Magic，所有品种
-    RG_ENTIRE_ACCOUNT = 1 // 整个账户的所有持仓
-};
-input group "亏损保护（金额单位：账户货币；0 = 关闭）"
-input(name="每笔持仓最大浮亏金额") double RGPositionLossLimit = 0;
-input(name="单笔亏损保护范围") RG_POSITION_SCOPE RGPositionScope = RG_OWN_MAGIC;
-input(name="整个账户每日最大亏损金额") double RGDailyLossLimit = 0;
-input(name="显示亏损保护状态") bool RGShowStatus = true;
-
 struct RGDayState
 {
     uint version;
@@ -64,7 +53,7 @@ bool RGTradingDealType(const long type)
 
 bool RGPositionInScope(const long position_magic, const long manager_magic)
 {
-    return RGPositionScope == RG_ENTIRE_ACCOUNT || position_magic == manager_magic;
+    return RGCurrentPositionScope == RG_ENTIRE_ACCOUNT || position_magic == manager_magic;
 }
 
 string RGDailyFileName()
@@ -163,9 +152,9 @@ void RGResetContext()
 
 bool RGValidateInputs()
 {
-    if (!MathIsValidNumber(RGPositionLossLimit) || RGPositionLossLimit < 0 ||
-        !MathIsValidNumber(RGDailyLossLimit) || RGDailyLossLimit < 0 ||
-        (RGPositionScope != RG_OWN_MAGIC && RGPositionScope != RG_ENTIRE_ACCOUNT))
+    if (!MathIsValidNumber(RGCurrentPositionLossLimit) || RGCurrentPositionLossLimit < 0 ||
+        !MathIsValidNumber(RGCurrentDailyLossLimit) || RGCurrentDailyLossLimit < 0 ||
+        (RGCurrentPositionScope != RG_OWN_MAGIC && RGCurrentPositionScope != RG_ENTIRE_ACCOUNT))
     {
         Print("[PS RR Guard] 亏损金额必须为非负数；0 表示关闭。");
         return false;
@@ -181,7 +170,7 @@ void RGOnPositionLatched(const ulong ticket)
     double net = 0;
     if (PositionSelectByTicket(ticket)) net = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
     RDPlayRiskAlert(StringFormat("持仓 #%I64u 单笔亏损触发：浮动盈亏 %.2f，额度 %.2f %s；开始强制平仓。",
-        ticket, net, RGPositionLossLimit, AccountInfoString(ACCOUNT_CURRENCY)));
+        ticket, net, RGCurrentPositionLossLimit, AccountInfoString(ACCOUNT_CURRENCY)));
 }
 
 // Runs independently of RR_Enable, before ordinary partial exits. The daily
@@ -189,20 +178,23 @@ void RGOnPositionLatched(const ulong ticket)
 bool RGManage(const long magic, const bool force = false)
 {
     if (RGAccount != AccountInfoInteger(ACCOUNT_LOGIN) || RGServer != AccountInfoString(ACCOUNT_SERVER)) RGResetContext();
+    // Panel drafts never reach the engine. Each cycle uses the last fully
+    // persisted account settings; a settings error must not undo exit latches.
+    const bool settings_ready = RGSyncSettings();
     RGEntryBlocked = false; RGLastError = "";
     const datetime now = TimeCurrent();
     const long today = RGDayStart(now);
     RGSnapshotReady = RGReadSnapshot(now, force);
     if (today == 0)
     {
-        RGEntryBlocked = RGDailyLossLimit > 0 || RGDailyLocked || FileIsExist(RGDailyFileName());
+        RGEntryBlocked = !settings_ready || RGCurrentDailyLossLimit > 0 || RGDailyLocked || FileIsExist(RGDailyFileName());
         RGStatus = "等待服务器时间";
         return !RGEntryBlocked;
     }
     // A new installation with daily protection disabled has no daily journal.
     // Existing records must still be read: lowering a limit to zero cannot
     // clear a trigger already latched earlier in the same day.
-    const bool use_daily_record = RGDailyLossLimit > 0 || FileIsExist(RGDailyFileName());
+    const bool use_daily_record = (settings_ready && RGCurrentDailyLossLimit > 0) || FileIsExist(RGDailyFileName());
     const int handle = use_daily_record ? FileOpen(RGDailyFileName(), FILE_READ | FILE_WRITE | FILE_BIN) : INVALID_HANDLE;
     if (use_daily_record && handle == INVALID_HANDLE)
     {
@@ -220,9 +212,9 @@ bool RGManage(const long magic, const bool force = false)
     }
     bool changed = RGAdvanceDay(s, today);
     bool new_daily_trigger = false;
-    if (!s.locked && RGSnapshotReady && RGLimitHit(RGRealized + RGFloating, RGDailyLossLimit))
+    if (settings_ready && !s.locked && RGSnapshotReady && RGLimitHit(RGRealized + RGFloating, RGCurrentDailyLossLimit))
     {
-        s.locked = 1; s.drained = 0; s.limit = RGDailyLossLimit; s.trigger_net = RGRealized + RGFloating;
+        s.locked = 1; s.drained = 0; s.limit = RGCurrentDailyLossLimit; s.trigger_net = RGRealized + RGFloating;
         changed = true; new_daily_trigger = true;
     }
     // Exposure added after a completed liquidation is also liquidated while
@@ -234,7 +226,7 @@ bool RGManage(const long magic, const bool force = false)
         return false;
     }
     RGDailyLocked = s.locked != 0;
-    RGEntryBlocked = RGDailyLocked || (RGDailyLossLimit > 0 && !RGSnapshotReady);
+    RGEntryBlocked = !settings_ready || RGDailyLocked || (RGCurrentDailyLossLimit > 0 && !RGSnapshotReady);
     if (new_daily_trigger)
         RDPlayRiskAlert(StringFormat("整个账户每日亏损触发：净盈亏 %.2f，额度 %.2f %s；取消挂单并清仓，当天锁定。",
             s.trigger_net, s.limit, AccountInfoString(ACCOUNT_CURRENCY)));
@@ -254,7 +246,7 @@ bool RGManage(const long magic, const bool force = false)
         if (ticket == 0) continue;
         const ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
         const double net = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
-        const bool single = RGPositionInScope(PositionGetInteger(POSITION_MAGIC), magic) && RGLimitHit(net, RGPositionLossLimit);
+        const bool single = settings_ready && RGPositionInScope(PositionGetInteger(POSITION_MAGIC), magic) && RGLimitHit(net, RGCurrentPositionLossLimit);
         if (!RGDailyLocked && !single && !RGPositionExitLatched(id)) continue;
         bool first = false;
         string status;
@@ -272,6 +264,7 @@ bool RGManage(const long magic, const bool force = false)
     else if (!RGSnapshotReady) RGStatus = "盈亏数据未就绪，等待历史同步";
     else RGStatus = "监控中";
     if (RGLastError != "") RGStatus += "；" + RGLastError;
+    if (!settings_ready) RGStatus += "；设置未就绪：" + RGSettingsError;
     return !RGEntryBlocked;
 }
 
@@ -306,16 +299,16 @@ void RGStatusLine(const int row, const string value, const color foreground)
 
 void RGRefreshStatus()
 {
-    if (!RGShowStatus) { RGDeleteStatus(); return; }
+    if (!RGCurrentShowStatus) { RGDeleteStatus(); return; }
     const string currency = AccountInfoString(ACCOUNT_CURRENCY);
-    const string daily = RGDailyLossLimit > 0 ? DoubleToString(RGDailyLossLimit, 2) : "关闭";
-    const string single = RGPositionLossLimit > 0 ? DoubleToString(RGPositionLossLimit, 2) : "关闭";
-    RGStatusLine(0, "亏损保护 [" + currency + "]  单笔 " + single + (RGPositionScope == RG_ENTIRE_ACCOUNT ? "（全账户）" : "（本 EA Magic）")
+    const string daily = RGCurrentDailyLossLimit > 0 ? DoubleToString(RGCurrentDailyLossLimit, 2) : "关闭";
+    const string single = RGCurrentPositionLossLimit > 0 ? DoubleToString(RGCurrentPositionLossLimit, 2) : "关闭";
+    RGStatusLine(0, "亏损保护 [" + currency + "]  单笔 " + single + (RGCurrentPositionScope == RG_ENTIRE_ACCOUNT ? "（全账户）" : "（本 EA Magic）")
         + " / 每日 " + daily + "（全账户，服务器日期）", clrDarkOrange);
     string numbers = "今日已实现 / 当前浮动 / 每日剩余额度：等待数据";
     if (RGSnapshotReady)
         numbers = "今日已实现 " + DoubleToString(RGRealized, 2) + " / 当前浮动 " + DoubleToString(RGFloating, 2)
-            + " / 每日剩余额度 " + (RGDailyLossLimit > 0 ? DoubleToString(MathMax(0, RGDailyLossLimit + RGRealized + RGFloating), 2) : "未启用");
+            + " / 每日剩余额度 " + (RGCurrentDailyLossLimit > 0 ? DoubleToString(MathMax(0, RGCurrentDailyLossLimit + RGRealized + RGFloating), 2) : "未启用");
     RGStatusLine(1, numbers, clrDarkOrange);
     RGStatusLine(2, RGStatus, RGEntryBlocked || RGLastError != "" ? clrOrangeRed : clrDarkOrange);
 }

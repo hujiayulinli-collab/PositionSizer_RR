@@ -2,11 +2,6 @@
 #ifndef PS_RR_DEAL_ALERTS_MQH
 #define PS_RR_DEAL_ALERTS_MQH
 
-input group "成交与亏损提示音"
-input(name="启用整个账户的实际成交提示音") bool RDEnableTradeSound = true;
-input(name="实际成交提示音（Sounds 内 WAV）") string RDTradeSound = "ok.wav";
-input(name="亏损限额报警音（Sounds 内 WAV）") string RDLossSound = "alert.wav";
-
 // Independent of the original panel's DisableTradingSounds: that option only
 // controls its order-submission sounds, not actual broker-confirmed fills.
 // Every matching DEAL_ADD event is queued once locally. A temporarily missing
@@ -123,7 +118,7 @@ bool RDTryDealAlert(const ulong deal)
     // All charts share one 700 ms window. Multiple partial fills/close bursts
     // are one audible event, rather than repeated overlapping playback.
     int sound_slot = RDClaimSoundWindow(audio_key, 700);
-    if (sound_slot != 0) RDPlayFile(RDTradeSound, "实际成交");
+    if (sound_slot != 0) RDPlayFile(RDCurrentTradeSound, "实际成交");
     return true;
 }
 
@@ -132,7 +127,7 @@ void RDOnTransaction(const MqlTradeTransaction &trans, const long magic)
     RDSyncAlertAccount();
     // magic intentionally does not filter: the default covers the entire
     // account, including manual closes whose deal magic can differ.
-    if (!RDEnableTradeSound || trans.type != TRADE_TRANSACTION_DEAL_ADD || trans.deal == 0) return;
+    if (!RDCurrentEnableTradeSound || trans.type != TRADE_TRANSACTION_DEAL_ADD || trans.deal == 0) return;
     if (trans.deal_type != DEAL_TYPE_BUY && trans.deal_type != DEAL_TYPE_SELL) return;
     for (int i = 0; i < ArraySize(RDPendingDeals); i++)
         if (RDPendingDeals[i] == trans.deal) return;
@@ -148,7 +143,7 @@ void RDOnTransaction(const MqlTradeTransaction &trans, const long magic)
 void RDFlushAlerts(const long magic)
 {
     RDSyncAlertAccount();
-    if (!RDEnableTradeSound)
+    if (!RDCurrentEnableTradeSound)
     {
         ArrayResize(RDPendingDeals, 0);
         RDPendingCursor = 0;
@@ -180,6 +175,6 @@ void RDPlayRiskAlert(const string message)
     // request the distinct risk WAV; subsequent forced-close fills are merged
     // for two seconds so their ordinary sound does not replace the risk alarm.
     Alert(message);
-    RDPlayFile(RDLossSound, "亏损限额报警");
+    RDPlayFile(RDCurrentLossSound, "亏损限额报警");
 }
 #endif

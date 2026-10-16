@@ -16,6 +16,17 @@ public:
     virtual bool Load(const int file_handle) { return true; }
 };
 
+struct RGPanelDraft
+{
+    string single;
+    string daily;
+    RG_POSITION_SCOPE scope;
+    bool show_status;
+    bool sound;
+    string trade_wav;
+    string loss_wav;
+};
+
 class CPositionSizeCalculator : public CAppDialog
 {
 private:
@@ -39,6 +50,18 @@ private:
     string           m_rr_multiple[RR_MAX_TARGETS], m_rr_percent[RR_MAX_TARGETS];
     bool             m_rr_be[RR_MAX_TARGETS];
 
+    CButton          m_BtnTabGuard, m_BtnGuardScope, m_BtnGuardSave, m_BtnGuardReset;
+    CEdit            m_EdtGuardSingle, m_EdtGuardDaily, m_EdtGuardTradeSound, m_EdtGuardLossSound;
+    CRRPlanCheckBox   m_ChkGuardShowStatus, m_ChkGuardTradeSound;
+    CLabel           m_LblGuardUnit, m_LblGuardSingle, m_LblGuardScope, m_LblGuardDaily, m_LblGuardDailyInfo, m_LblGuardDailyInfo2,
+                     m_LblGuardTradeSound, m_LblGuardLossSound, m_LblGuardRealized, m_LblGuardFloating, m_LblGuardRemaining,
+                     m_LblGuardState, m_LblGuardState2, m_LblGuardStatus, m_LblGuardStatus2;
+    RGPanelDraft     m_guard_draft, m_guard_saved;
+    bool             m_guard_visible, m_guard_dirty, m_guard_stale;
+    uint             m_guard_revision;
+    ulong            m_guard_last_refresh;
+    string           m_guard_account_key;
+
     string           m_FileName;
     double           m_DPIScale;
     bool             m_controls_ready; // Base Create() can call virtual layout methods before our controls exist.
@@ -54,7 +77,7 @@ private:
     CLabel           AdditionalTPLabels[], AdditionalTPWarnings[];
     CButton          AdditionalTPButtonsIncrease[], AdditionalTPButtonsDecrease[];
     // Store ordered and named panel objects arranged by tabs.
-    CPanelList       *MainTabList, *RiskTabList, *MarginTabList, *SwapsTabList, *TradingTabList, *RRTabList, *PersistentList; // PersisntentList can be potentially used for Strategy Tester event tracking in the future.
+    CPanelList       *MainTabList, *RiskTabList, *MarginTabList, *SwapsTabList, *TradingTabList, *RRTabList, *GuardTabList, *PersistentList; // PersisntentList can be potentially used for Strategy Tester event tracking in the future.
     
     // Some of the panel measurement parameters are used by more than one method:
     int              first_column_start, normal_label_width, normal_edit_width, second_column_start, element_height, third_column_start, narrow_label_width, v_spacing, multi_tp_column_start,
@@ -139,6 +162,7 @@ public:
             void     MoveOutsideTradeButton();
             double   DPIScale() {return m_DPIScale;}
             void     RefreshRRLiveStatus(); // Refreshes live labels without replacing the edit draft.
+            void     RefreshGuardLiveStatus();
             // Remember the panel's location to have the same location for minimized and maximized states.
             int      remember_top, remember_left;
 private:
@@ -175,6 +199,19 @@ private:
     void             OnClickBtnRRPrevious();
     void             OnClickBtnRRNext();
     void             OnClickBtnRRDelete(const int row);
+    bool             CreateGuardControls();
+    bool             GuardSettingsEditable();
+    void             ShowGuard();
+    void             HideGuard();
+    void             LoadGuardDraft();
+    void             RenderGuardDraft();
+    void             CaptureGuardDraft();
+    void             SetGuardStatus(const string text, const bool error = false);
+    void             OnClickBtnTabGuard();
+    void             OnClickBtnGuardScope();
+    void             OnClickBtnGuardSave();
+    void             OnClickBtnGuardReset();
+    void             OnGuardDraftChanged();
     virtual bool     CreateObjects();
     virtual bool     InitObjects();
     virtual bool     DisplayValues(); // Updates values in the panel.
@@ -265,9 +302,20 @@ private:
 };
 
 #include "RRPlanPanel.mqh"
+#include "RRGuardPanel.mqh"
 
 // Event Map
 EVENT_MAP_BEGIN(CPositionSizeCalculator)
+ON_EVENT(ON_CLICK, m_BtnTabGuard, OnClickBtnTabGuard)
+ON_EVENT(ON_CLICK, m_BtnGuardScope, OnClickBtnGuardScope)
+ON_EVENT(ON_CLICK, m_BtnGuardSave, OnClickBtnGuardSave)
+ON_EVENT(ON_CLICK, m_BtnGuardReset, OnClickBtnGuardReset)
+ON_EVENT(ON_END_EDIT, m_EdtGuardSingle, OnGuardDraftChanged)
+ON_EVENT(ON_END_EDIT, m_EdtGuardDaily, OnGuardDraftChanged)
+ON_EVENT(ON_END_EDIT, m_EdtGuardTradeSound, OnGuardDraftChanged)
+ON_EVENT(ON_END_EDIT, m_EdtGuardLossSound, OnGuardDraftChanged)
+ON_EVENT(ON_CHANGE, m_ChkGuardShowStatus, OnGuardDraftChanged)
+ON_EVENT(ON_CHANGE, m_ChkGuardTradeSound, OnGuardDraftChanged)
 ON_EVENT(ON_CLICK, m_BtnTabRR, OnClickBtnTabRR)
 ON_EVENT(ON_CLICK, m_BtnRRAdd, OnClickBtnRRAdd)
 ON_EVENT(ON_CLICK, m_BtnRRSave, OnClickBtnRRSave)
@@ -405,6 +453,7 @@ CPositionSizeCalculator::~CPositionSizeCalculator(void)
     if (CheckPointer(SwapsTabList) == POINTER_DYNAMIC) delete SwapsTabList;
     if (CheckPointer(TradingTabList) == POINTER_DYNAMIC) delete TradingTabList;
     if (CheckPointer(RRTabList) == POINTER_DYNAMIC) delete RRTabList;
+    if (CheckPointer(GuardTabList) == POINTER_DYNAMIC) delete GuardTabList;
     if (CheckPointer(PersistentList) == POINTER_DYNAMIC) delete PersistentList;
     MainTabList = NULL;
     RiskTabList = NULL;
@@ -412,6 +461,7 @@ CPositionSizeCalculator::~CPositionSizeCalculator(void)
     SwapsTabList = NULL;
     TradingTabList = NULL;
     RRTabList = NULL;
+    GuardTabList = NULL;
     PersistentList = NULL;
 }
 
@@ -441,12 +491,21 @@ void CPositionSizeCalculator::InitVariables()
     m_rr_dirty = false;
     ZeroMemory(m_rr_state);
     ZeroMemory(m_rr_loaded_plan);
+    ZeroMemory(m_guard_draft);
+    ZeroMemory(m_guard_saved);
+    m_guard_visible = false;
+    m_guard_dirty = false;
+    m_guard_stale = false;
+    m_guard_revision = 0;
+    m_guard_last_refresh = 0;
+    m_guard_account_key = "";
     MainTabList = NULL;
     RiskTabList = NULL;
     MarginTabList = NULL;
     SwapsTabList = NULL;
     TradingTabList = NULL;
     RRTabList = NULL;
+    GuardTabList = NULL;
     PersistentList = NULL;
     LinesSelectedStatus = 0;
     remember_left = -1;
@@ -738,26 +797,36 @@ bool CPositionSizeCalculator::CreateObjects()
 // Tabs
 
     PersistentList = new CPanelList;
-    int rr_tab_width = (int)MathRound(42 * m_DPIScale);
-    int rr_tab_gap = (int)MathRound(3 * m_DPIScale);
+    // Seven legible Chinese tabs occupy 305 logical pixels including gaps.
+    // Round absolute edges so fractional DPI does not accumulate rounding drift.
     int rr_tab_x = first_column_start;
-    if (!ButtonCreate(PersistentList, m_BtnTabMain, rr_tab_x, y, rr_tab_x + rr_tab_width, y + element_height, "m_BtnTabMain", TRANSLATION_TAB_BUTTON_MAIN)) return false;
-    rr_tab_x += rr_tab_width + rr_tab_gap;
+    if (!ButtonCreate(PersistentList, m_BtnTabMain, rr_tab_x, y, first_column_start + (int)MathRound(33 * m_DPIScale), y + element_height, "m_BtnTabMain", "主页")) return false;
+    m_BtnTabMain.FontSize(9);
+    rr_tab_x = first_column_start + (int)MathRound(36 * m_DPIScale);
     MainTabList = new CPanelList;
-    if (!ButtonCreate(PersistentList, m_BtnTabRisk, rr_tab_x, y, rr_tab_x + rr_tab_width, y + element_height, "m_BtnTabRisk", TRANSLATION_TAB_BUTTON_RISK)) return false;
-    rr_tab_x += rr_tab_width + rr_tab_gap;
+    if (!ButtonCreate(PersistentList, m_BtnTabRisk, rr_tab_x, y, first_column_start + (int)MathRound(69 * m_DPIScale), y + element_height, "m_BtnTabRisk", TRANSLATION_TAB_BUTTON_RISK)) return false;
+    m_BtnTabRisk.FontSize(9);
+    rr_tab_x = first_column_start + (int)MathRound(72 * m_DPIScale);
     RiskTabList = new CPanelList;
-    if (!ButtonCreate(PersistentList, m_BtnTabMargin, rr_tab_x, y, rr_tab_x + rr_tab_width, y + element_height, "m_BtnTabMargin", TRANSLATION_TAB_BUTTON_MARGIN)) return false;
-    rr_tab_x += rr_tab_width + rr_tab_gap;
+    if (!ButtonCreate(PersistentList, m_BtnTabMargin, rr_tab_x, y, first_column_start + (int)MathRound(115 * m_DPIScale), y + element_height, "m_BtnTabMargin", TRANSLATION_TAB_BUTTON_MARGIN)) return false;
+    m_BtnTabMargin.FontSize(9);
+    rr_tab_x = first_column_start + (int)MathRound(118 * m_DPIScale);
     MarginTabList = new CPanelList;
-    if (!ButtonCreate(PersistentList, m_BtnTabSwaps, rr_tab_x, y, rr_tab_x + rr_tab_width, y + element_height, "m_BtnTabSwaps", TRANSLATION_TAB_BUTTON_SWAPS)) return false;
-    rr_tab_x += rr_tab_width + rr_tab_gap;
+    if (!ButtonCreate(PersistentList, m_BtnTabSwaps, rr_tab_x, y, first_column_start + (int)MathRound(151 * m_DPIScale), y + element_height, "m_BtnTabSwaps", TRANSLATION_TAB_BUTTON_SWAPS)) return false;
+    m_BtnTabSwaps.FontSize(9);
+    rr_tab_x = first_column_start + (int)MathRound(154 * m_DPIScale);
     SwapsTabList = new CPanelList;
-    if (!ButtonCreate(PersistentList, m_BtnTabTrading, rr_tab_x, y, rr_tab_x + rr_tab_width, y + element_height, "m_BtnTabTrading", TRANSLATION_TAB_BUTTON_TRADING)) return false;
-    rr_tab_x += rr_tab_width + rr_tab_gap;
+    if (!ButtonCreate(PersistentList, m_BtnTabTrading, rr_tab_x, y, first_column_start + (int)MathRound(187 * m_DPIScale), y + element_height, "m_BtnTabTrading", TRANSLATION_TAB_BUTTON_TRADING)) return false;
+    m_BtnTabTrading.FontSize(9);
+    rr_tab_x = first_column_start + (int)MathRound(190 * m_DPIScale);
     TradingTabList = new CPanelList;
-    if (!ButtonCreate(PersistentList, m_BtnTabRR, rr_tab_x, y, rr_tab_x + (int)MathRound(82 * m_DPIScale), y + element_height, "m_BtnTabRR", "分仓止盈")) return false;
+    if (!ButtonCreate(PersistentList, m_BtnTabRR, rr_tab_x, y, first_column_start + (int)MathRound(246 * m_DPIScale), y + element_height, "m_BtnTabRR", "分仓止盈")) return false;
+    m_BtnTabRR.FontSize(9);
+    rr_tab_x = first_column_start + (int)MathRound(249 * m_DPIScale);
     RRTabList = new CPanelList;
+    if (!ButtonCreate(PersistentList, m_BtnTabGuard, rr_tab_x, y, first_column_start + (int)MathRound(305 * m_DPIScale), y + element_height, "m_BtnTabGuard", "亏损保护")) return false;
+    m_BtnTabGuard.FontSize(9);
+    GuardTabList = new CPanelList;
 
 // Main
 
@@ -1427,6 +1496,7 @@ bool CPositionSizeCalculator::CreateObjects()
     }
 
     if (!CreateRRControls()) return false;
+    if (!CreateGuardControls()) return false;
 
     // All tab lists and controls now exist. InitObjects() may itself cause
     // layout callbacks, so enable those callbacks before initializing values.
@@ -1551,6 +1621,7 @@ bool CPositionSizeCalculator::InitObjects()
     HideSwaps();
     HideTrading();
     HideRR();
+    HideGuard();
 
     if (sets.SelectedTab == MainTab) ShowMain();
     else if (sets.SelectedTab == RiskTab) ShowRisk();
@@ -1558,6 +1629,7 @@ bool CPositionSizeCalculator::InitObjects()
     else if (sets.SelectedTab == SwapsTab) ShowSwaps();
     else if (sets.SelectedTab == TradingTab) ShowTrading();
     else if (sets.SelectedTab == RRTargetsTab) ShowRR();
+    else if (sets.SelectedTab == GuardTab) ShowGuard();
 
     InitControlsValues(); // Init values inside controls.
 
@@ -1899,6 +1971,9 @@ void CPositionSizeCalculator::MoveAndResize()
     case RRTargetsTab:
         ref_point = m_LblRRStatus2.Top();
         break;
+    case GuardTab:
+        ref_point = m_LblGuardStatus2.Top();
+        break;
     default:
         ref_point = m_LblRiskM.Top();
         break;
@@ -2225,6 +2300,7 @@ void CPositionSizeCalculator::Minimize()
         CAppDialog::Minimize();
         return;
     }
+    if (m_guard_visible) CaptureGuardDraft();
     CAppDialog::Minimize();
     sets.IsPanelMinimized = true;
     if (remember_left != -1)
@@ -2255,6 +2331,7 @@ void CPositionSizeCalculator::Maximize()
     HideSwaps();
     HideTrading();
     HideRR();
+    HideGuard();
 
     if (!m_minimized)
     {
@@ -2264,6 +2341,7 @@ void CPositionSizeCalculator::Maximize()
         else if (sets.SelectedTab == SwapsTab) ShowSwaps();
         else if (sets.SelectedTab == TradingTab) ShowTrading();
         else if (sets.SelectedTab == RRTargetsTab) ShowRR();
+        else if (sets.SelectedTab == GuardTab) ShowGuard();
     }
 
     MoveAndResize();
@@ -2941,6 +3019,7 @@ void CPositionSizeCalculator::OnClickBtnTabMain()
         HideSwaps();
         HideTrading();
     HideRR();
+    HideGuard();
 
         MoveAndResize();
         RefreshValues();
@@ -2958,6 +3037,7 @@ void CPositionSizeCalculator::OnClickBtnTabRisk()
         HideSwaps();
         HideTrading();
     HideRR();
+    HideGuard();
 
         MoveAndResize();
         RefreshValues();
@@ -2975,6 +3055,7 @@ void CPositionSizeCalculator::OnClickBtnTabMargin()
         HideSwaps();
         HideTrading();
     HideRR();
+    HideGuard();
 
         MoveAndResize();
         RefreshValues();
@@ -2992,6 +3073,7 @@ void CPositionSizeCalculator::OnClickBtnTabSwaps()
         ShowSwaps();
         HideTrading();
     HideRR();
+    HideGuard();
 
         MoveAndResize();
         RefreshValues();
@@ -3009,6 +3091,7 @@ void CPositionSizeCalculator::OnClickBtnTabTrading()
         HideSwaps();
         ShowTrading();
         HideRR();
+    HideGuard();
 
         MoveAndResize();
     }

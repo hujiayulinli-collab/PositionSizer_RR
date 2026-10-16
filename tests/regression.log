@@ -51,7 +51,7 @@ PASS both directions: executable final price never precedes requested R
 
 50 tests passed against D:\codex\tradingIndicators\PositionSizer_RR\mt5\RRCore.mqh
 Scope: pure calculations only; terminal execution, persistence and broker behaviour require the demo scenarios in MANUAL_TESTS.md.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_core.test.mjs (49.866ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_core.test.mjs (55.689ms)
 ok 1 - initialization does not scan history or replay existing deals
 ok 2 - only trade DEAL_ADD callbacks enter the queue
 ok 3 - transaction callback queues work without blocking on history or playing audio
@@ -78,8 +78,9 @@ ok 23 - distinct simultaneous loss conditions are independently reported
 ok 24 - risk Alert remains available even if shared notification state is unavailable
 ok 25 - 64-bit deal identifiers remain exact in deduplication keys
 ok 26 - notification implementation has no trading or broad-history replay APIs
-RR deal alerts: 26 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_deal_alerts.test.mjs (79.4736ms)
+ok 27 - successful submission cannot bypass the panel sound switch through the original success tone
+RR deal alerts: 27 production-method tests passed.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_deal_alerts.test.mjs (87.6375ms)
 ok 1 - runner entry uses TP zero while keeping the last target preview intact
 ok 2 - full-exit plan continues to install its server TP
 ok 3 - RR-disabled original entry preserves the ordinary TP
@@ -91,7 +92,7 @@ ok 8 - runner confirmation explains retained share and no server full TP
 ok 9 - full-exit confirmation uses actual passed TP rather than stale preview
 ok 10 - BE-only entry has no forced server TP and clearly retains 100 percent
 10 entry TP checks passed
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_entry_tp.test.mjs (50.9123ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_entry_tp.test.mjs (54.5872ms)
 ok 1 - threshold is inclusive and zero/nonfinite limits cannot trigger
 ok 2 - server day normalization handles midnight and unavailable time
 ok 3 - today accounting includes trade profit swap commission fee and excludes cash operations
@@ -129,7 +130,7 @@ ok 34 - truncated journal record is rejected and no guard execution starts
 ok 35 - account or broker changes reset cached totals and choose a different daily record
 ok 36 - input validation rejects negative nonfinite limits and unknown position scope
 RR guard: 36 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard.test.mjs (90.0911ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard.test.mjs (95.3188ms)
 PASS new latch saves and alarms before preflight/send with exact hedging ticket
 PASS disabled trading still latches once and resumes after permission restores
 PASS empty key cannot adopt a fresh position
@@ -177,7 +178,7 @@ PASS latched cancellation survives restart and lost reply without re-sending
 
 44 guard execution tests passed against actual production function bodies.
 Scope: simulated MT5 file/order/position boundaries only; no terminal journals, UI operations or real trades.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_execution.test.mjs (72.4655ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_execution.test.mjs (67.3895ms)
 PASS without post-lock check, first-file race reaches both emergency and ordinary execution
 PASS production rechecks after first journal lock and suppresses ordinary exit in the race
 PASS an existing emergency latch skips ordinary journal and execution entirely
@@ -197,10 +198,95 @@ PASS actual entry preflight checks money guard even when RR is disabled
 PASS Trade always starts with guarded entry preflight
 PASS both pending and market sends recheck daily guard after their confirmation dialog
 PASS post-entry ordinary management is conditional on a fresh guard result
+PASS saved lower single-position threshold applies to the already-open position on the next pass
+PASS a draft lower threshold never reaches the engine until it is saved
+PASS saved lower daily threshold immediately latches current losses and cancels before closing
+PASS changing scope affects existing positions at the next settings synchronization
+PASS disabling or raising the daily threshold never clears a current-day durable lock
+PASS disabling single protection and narrowing scope retain an existing position exit latch
+PASS unreadable shared settings fail closed without triggering unverified default thresholds
+PASS unreadable settings still drain a daily lock across all magic numbers and pending orders
+PASS unreadable settings continue single-position and order latches without creating unrelated exits
+PASS settings recovery removes its entry block while preserving any independent daily lock
+PASS fresh pre-send entry check synchronizes a cross-chart cap update and forces a current snapshot
+PASS account context reset happens before settings synchronization and does not erase its failure block
+PASS initialization loads shared settings before controls and keeps the settings page recoverable on load failure
 
-19 guard integration tests passed against production functions.
+32 guard integration tests passed against production functions.
 Scope: in-memory scheduling and boundary simulation, plus source contracts for the full trading form. No live trading.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_integration.test.mjs (69.5596ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_integration.test.mjs (80.68ms)
+PASS first init and repeated sync keep input defaults without creating a journal
+PASS explicit first save validates, flushes, reads back and publishes every setting
+PASS the POD record contains no dynamic strings and has bounded UTF-16 fields
+PASS a restarted chart loads persisted settings instead of its different input defaults
+PASS charts retain independent legacy defaults until the first explicit account save
+PASS optimistic revision rejects another chart stale draft without changing its runtime
+PASS second save appends revision two while preserving the first complete record
+PASS saving a lower or zero cap does not touch daily lock or emergency records
+PASS negative and nonfinite caps are rejected before any write or live mutation
+PASS invalid scope is rejected without affecting active settings
+PASS WAV validation accepts Unicode, commas, spaces and relative subfolders
+PASS WAV validation rejects empty, non-WAV, traversal, absolute and invalid Windows names
+PASS WAV validation rejects control characters and every newline form
+PASS 128 UTF-16 code units round trip but a 129-unit path is rejected
+PASS invalid sound fields cannot be saved even when trade sound is switched off
+PASS invalid legacy defaults can be repaired through a first valid panel save
+PASS saved valid settings supersede invalid first-load inputs
+PASS busy settings lock prevents writes and preserves live runtime
+PASS sync lock failure marks not ready while preserving the last valid live settings
+PASS short append leaves live settings unchanged and torn journal fails closed
+PASS flush failure reports ambiguity and a later reload may observe a full committed record
+PASS failed readback never publishes immediately and can be verified on explicit reload
+PASS corrupt full write is rejected by readback checksum before publication
+PASS seek failure keeps active settings and releases every handle
+PASS existing empty journal is not overwritten as a first installation
+PASS corrupt existing record cannot be overwritten with a new valid draft
+PASS valid checksum cannot bypass account or server binding
+PASS valid checksum cannot bypass finite amounts, scope, or boolean validation
+PASS fixed-string lengths and terminator padding are checked before decoding
+PASS embedded NUL cannot hide unvalidated characters behind a valid WAV prefix
+PASS revision must agree with complete append-frame count
+PASS rollback to an older complete journal does not lower a running revision
+PASS a disappeared saved journal cannot silently restore defaults or create a fresh stale revision
+PASS switching accounts restores per-instance defaults until that account has a saved record
+PASS same login on a different server does not inherit the prior server settings
+PASS save rejects account changes before the panel has synchronized its account context
+PASS an account change during read cannot publish the old account record
+PASS account change during commit preserves live values and reports unconfirmed application
+PASS no logged-in account cannot load or save account-bound settings
+PASS oversized invalid input defaults cannot cause an out-of-bounds restore on account switch
+
+40 account-settings tests passed against production function bodies.
+Scope: in-memory binary files and account context; no terminal files, UI or trades.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_settings.test.mjs (133.7913ms)
+ok 1 - initial controls load all seven current saved account values
+ok 2 - typing scope and checkbox changes stay drafts without changing active settings
+ok 3 - valid explicit save applies exact draft values with the loaded revision
+ok 4 - blank malformed negative and nonfinite amounts never become accidental zero limits
+ok 5 - zero caps are accepted only through an explicit valid save
+ok 6 - undo restores amounts scope checkboxes and sound filenames from saved configuration
+ok 7 - hiding and reopening the page preserves unfinished text and checkbox draft
+ok 8 - routine live refresh uses applied daily limit and never overwrites unfinished edits
+ok 9 - pristine draft automatically follows a saved change from another chart
+ok 10 - another chart update preserves a dirty draft while disabling stale save
+ok 11 - revision check also protects save before the next live refresh
+ok 12 - config store receives expected revision for races occurring after the UI check
+ok 13 - account switch with the same revision cannot apply an old account draft
+ok 14 - account switch clears the old draft even while the new saved record is unavailable
+ok 15 - saved-record read failures preserve same-account draft and block save until recovery
+ok 16 - first-run invalid F7 defaults remain repairable through the page without reopening properties
+ok 17 - repair exception cannot overwrite an existing corrupt record or missing previously saved file
+ok 18 - repair exception requires initialized defaults and the current account identity
+ok 19 - a save error preserves the draft and reports ambiguous persistence without claiming success
+ok 20 - changing limits never clears an already latched daily lock in the panel
+ok 21 - unavailable live accounting is shown as waiting instead of stale numeric certainty
+ok 22 - tab selection hides every other page and sizes the guard page
+ok 23 - guard controls stay within the existing content width and row actions do not overlap
+ok 24 - seven actual tab definitions retain legible fonts and disjoint button rectangles
+ok 25 - explicit reload synchronizes the account record before discarding a draft
+ok 26 - draft and rendering methods do not call trading manager executors or audio playback
+RR guard UI: 26 production-method tests passed.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_ui.test.mjs (95.0505ms)
 PASS legacy scalar field order still matches the released schema
 PASS v2 retains scalar prefix and adds all 20 target slots
 PASS legacy conversion preserves every scalar and clears new target fields
@@ -236,7 +322,7 @@ PASS released v1 and full-exit v2 records retain full-exit interpretation
 
 32 journal tests passed against production save/load and conversion functions.
 Scope: binary schema and state decisions with a simulated MQL file boundary; native packing and durable storage still require terminal validation.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_journal.test.mjs (81.7338ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_journal.test.mjs (80.2289ms)
 PASS read returns frozen plan and ticket without writes
 PASS read legacy plan as two targets without migration
 PASS read never adopts a position without journal
@@ -286,7 +372,7 @@ PASS near-100 full-exit stage still owes the final lot step and cannot be edited
 
 46 live-plan tests passed against production APIs.
 Scope: in-memory MT5 boundaries; no real positions, journal files, or trading requests.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_live_plan.test.mjs (73.0785ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_live_plan.test.mjs (72.2698ms)
 PASS below 2R updates stops without reducing
 PASS 2R intent is saved before requesting half close
 PASS first partial fill is topped up only to the initial half
@@ -389,7 +475,7 @@ PASS previously valid near-100 v2 plan still closes the exact remainder
 
 99 manager tests passed against production RRProcess/RRProcessMulti/RRResolvePending/RRUpdateStops/RRCapture/RRPlanCanEdit.
 Scope: simulated MT5 boundaries; no real trading requests, terminal compilation or journal IO.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manager.test.mjs (61.148ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manager.test.mjs (65.7039ms)
 PASS old production callback reproduces invalid RiskTabList access
 PASS old early Minimize prematurely saves panel settings
 PASS constructor initialization explicitly clears lifecycle state and all lists
@@ -406,6 +492,9 @@ PASS Destroy revokes readiness before base destruction and subsequent callbacks
 PASS destructor frees all dynamic lists once and handles an empty repeated cleanup
 PASS hiding the RR tab captures its draft before hiding controls
 PASS hiding an uncreated RR tab does not dereference its list
+PASS hiding the guard tab captures its draft before hiding controls
+PASS minimizing the guard tab captures uncommitted edits before saving layout
+PASS hiding an uncreated guard tab cannot dereference controls or a null list
 PASS draft BE checkboxes never enter the generic panel layout stream
 PASS OnInit validates RR before allocating or creating controls
 PASS actual init-failed deinit destroys only partial panel and never saves settings
@@ -425,9 +514,9 @@ PASS actual orphan cleanup deletes RR shell while preserving original panel and 
 PASS failed ObjectDelete cannot trap initialization in an endless cleanup loop
 PASS a user price line carrying an RR-like Caption name cannot initiate cleanup
 
-34 lifecycle tests passed; the preserved pre-fix methods reproduce the reported null-list failure.
+37 lifecycle tests passed; the preserved pre-fix methods reproduce the reported null-list failure.
 Scope: actual MQL panel method bodies with simulated MT5 boundaries; visual terminal checks remain necessary.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_panel_lifecycle.test.mjs (448.0539ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_panel_lifecycle.test.mjs (646.3056ms)
 PASS target limit is exactly 20
 PASS single final exit is valid
 PASS legacy two-target default is valid
@@ -488,7 +577,7 @@ PASS all 1..20 equal-share target counts handle exact step quantities
 
 57 tests passed against production RRPlan.mqh functions.
 Scope: input validation and planned quantities; broker execution and binary file durability are tested separately.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan.test.mjs (56.2985ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan.test.mjs (57.2441ms)
 ok 1 - saved plan loads R, percentage and BE independently
 ok 2 - unused rows are hidden and visible targets stay visible
 ok 3 - typing and BE edits remain a draft until save
@@ -532,7 +621,7 @@ ok 40 - a zero-close BE-only plan displays all original volume retained without 
 ok 41 - cross-page allocation summary includes saved draft values on other pages
 ok 42 - invalid and excessive percentages do not advertise a valid retained balance or rewrite input
 RR plan UI: 42 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan_ui.test.mjs (125.9361ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan_ui.test.mjs (137.9202ms)
 ok 1 - managed target uses frozen fill rather than current calculator entry
 ok 2 - all matching managed positions have separate names
 ok 3 - triggered target stays at original level with triggered status
@@ -556,12 +645,12 @@ ok 20 - runner retains completed target marks after all targets have triggered
 ok 21 - new runner preview clearly shows retained share
 ok 22 - BE-only runner labels show no invented forced close
 22 chart annotations checks passed
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_target_lines.test.mjs (77.941ms)
-ℹ tests 13
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_target_lines.test.mjs (77.4235ms)
+ℹ tests 15
 ℹ suites 0
-ℹ pass 13
+ℹ pass 15
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 479.7607
+ℹ duration_ms 684.3209

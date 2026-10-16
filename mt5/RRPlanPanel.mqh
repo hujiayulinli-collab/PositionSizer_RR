@@ -390,6 +390,7 @@ void CPositionSizeCalculator::OnClickBtnTabRR()
     HideMargin();
     HideSwaps();
     HideTrading();
+    HideGuard();
     ShowRR();
     MoveAndResize();
     ChartRedraw();

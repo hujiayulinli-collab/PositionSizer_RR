@@ -66,7 +66,8 @@ enum TABS
     MarginTab,
     SwapsTab,
     TradingTab,
-    RRTargetsTab
+    RRTargetsTab,
+    GuardTab
 };
 
 enum TRADE_DIRECTION

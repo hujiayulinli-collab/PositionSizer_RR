@@ -1,4 +1,4 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //|                                       Position Sizer Trading.mqh |
 //|                                  Copyright © 2026, EarnForex.com |
 //|                                       https://www.earnforex.com/ |
@@ -778,10 +778,10 @@ void Trade()
     // Capture confirmed fills immediately, including SL/TP applied after a
     // market-execution order; pending orders are captured when they fill.
     if (AtLeastOneOrderExecuted && RGManage(sets.MagicNumber, true)) RRManage(SymbolForTrading, sets.MagicNumber);
-    // Successful executions sound on confirmed deal events, including SL/TP.
-    // Keep the original failure sound, and its success fallback if deal sounds are off.
-    if (!DisableTradingSounds && (isOrderPlacementFailing || !AtLeastOneOrderExecuted || !RDEnableTradeSound))
-        PlaySound((isOrderPlacementFailing) || (!AtLeastOneOrderExecuted) ? "timeout.wav" : "ok.wav");
+    // The panel's trade-sound switch controls every successful fill. Retain
+    // only the original failure notification; no success fallback bypasses it.
+    if (!DisableTradingSounds && (isOrderPlacementFailing || !AtLeastOneOrderExecuted))
+        PlaySound("timeout.wav");
 
     delete Trade;
 }

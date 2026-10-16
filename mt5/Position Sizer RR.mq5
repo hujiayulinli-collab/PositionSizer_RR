@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.180"
-string    Version = "3.14 - RR 1.40";
+#property version   "3.190"
+string    Version = "3.14 - RR 1.50";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -27,6 +27,8 @@ string    Version = "3.14 - RR 1.40";
 #include "RRPlan.mqh"
 bool RGPositionExitLatched(const ulong identifier);
 #include "Position Sizer RR.mqh"
+#include "RRGuardInputs.mqh"
+#include "RRGuardSettings.mqh"
 #include "RRGuardExecution.mqh"
 #include "RRDealAlerts.mqh"
 #include "RRGuard.mqh"
@@ -213,7 +215,9 @@ int OnInit()
     RGDeleteStatus();
     RRPanelInitSucceeded = false;
     // Validate before allocating controls: a failed init must not leave a shell.
-    if (!RRValidateInputs() || !RGValidateInputs()) return INIT_PARAMETERS_INCORRECT;
+    if (!RRValidateInputs()) return INIT_PARAMETERS_INCORRECT;
+    RGUseInputDefaults();
+    if (!RGInitSettings()) Print("[PS RR Guard] ", RGSettingsError);
     RGResetContext();
     RDInitAlerts();
     SymbolForTrading = (TradeSymbol != "" ? TradeSymbol : _Symbol);
@@ -649,7 +653,7 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] RR 1.40 面板初始化完成。亏损保护按输入参数执行，0 金额表示关闭。");
+    Print("[PS RR] RR 1.50 面板初始化完成。请在“亏损保护”页填写金额并保存，0 金额表示关闭。");
     return INIT_SUCCEEDED;
 }
 
@@ -1171,6 +1175,7 @@ void OnTimer()
 void RRRefreshViews(const bool force = false)
 {
     if (!RRPanelInitSucceeded || CheckPointer(ExtDialog) != POINTER_DYNAMIC) return;
+    ExtDialog.RefreshGuardLiveStatus();
     RGRefreshStatus();
     ExtDialog.RefreshRRLiveStatus();
     RRRefreshTargetLines(SymbolForTrading, sets.MagicNumber, tEntryLevel, tStopLossLevel,

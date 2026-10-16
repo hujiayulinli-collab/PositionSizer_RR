@@ -37,7 +37,7 @@ function fixture(b = broker()) {
     const types = ['BUY', 'SELL', 'COMMISSION', 'COMMISSION_DAILY', 'COMMISSION_MONTHLY', 'COMMISSION_AGENT_DAILY', 'COMMISSION_AGENT_MONTHLY',
         'BALANCE', 'CREDIT', 'CHARGE', 'CORRECTION', 'BONUS', 'INTEREST', 'DIVIDEND', 'DIVIDEND_FRANKED', 'TAX', 'BUY_CANCELED', 'SELL_CANCELED'];
     const s = {
-        RG_OWN_MAGIC: 0, RG_ENTIRE_ACCOUNT: 1, RGPositionScope: 0, RGPositionLossLimit: 0, RGDailyLossLimit: 0, RGShowStatus: true, RR_Enable: true,
+        RG_OWN_MAGIC: 0, RG_ENTIRE_ACCOUNT: 1, RGCurrentPositionScope: 0, RGCurrentPositionLossLimit: 0, RGCurrentDailyLossLimit: 0, RGCurrentShowStatus: true, RR_Enable: true,
         RGAccount: 0, RGServer: '', RGHistoryDirty: true, RGSnapshotReady: false, RGDailyLocked: false, RGEntryBlocked: false,
         RGRealized: 0, RGFloating: 0, RGCachedBalance: 0, RGCachedDay: 0, RGHistoryAt: 0, RGStatus: '', RGLastError: '',
         ACCOUNT_LOGIN: 'account', ACCOUNT_SERVER: 'server', ACCOUNT_CURRENCY: 'currency', ACCOUNT_BALANCE: 'balance',
@@ -86,6 +86,7 @@ function fixture(b = broker()) {
             if (!b.executorAllowed) { setStatus('算法交易未允许'); return false; }
             b.positions = b.positions.filter(p => p.ticket !== ticket); return true;
         },
+        RGSyncSettings: () => s.settingsOK, settingsOK: true, RGSettingsError: 'settings error',
         RDPlayRiskAlert: message => b.alerts.push(message), Alert: (...text) => b.alerts.push(text.join('')),
         Print: (...text) => b.notices.push(text.join('')), RRNotice: text => b.notices.push(text),
     };
@@ -147,29 +148,29 @@ check('daily net includes current floating and overnight swap but excludes yeste
     assert.equal(s.RGRealized, 100); assert.equal(s.RGFloating, -320);
 });
 check('realized profit offsets realized loss before the daily threshold check', () => {
-    const b = broker(), s = fixture(b); s.RGDailyLossLimit = 1000; s.deal(1, -1100); s.deal(2, 200); s.pos(10, 0);
+    const b = broker(), s = fixture(b); s.RGCurrentDailyLossLimit = 1000; s.deal(1, -1100); s.deal(2, 200); s.pos(10, 0);
     assert.equal(s.RGManage(42), true); assert.equal(s.RGDailyLocked, false); assert.equal(b.executions.length, 0);
 });
 check('minus 2500 realized plus minus 400 floating triggers exactly a 2900 cap', () => {
-    const b = broker(), s = fixture(b); s.RGDailyLossLimit = 2900; s.deal(1, -2500); s.pos(10, -400);
+    const b = broker(), s = fixture(b); s.RGCurrentDailyLossLimit = 2900; s.deal(1, -2500); s.pos(10, -400);
     assert.equal(s.RGManage(42), false); assert.equal(s.RGDailyLocked, true); assert.equal(s.latest().trigger_net, -2900);
     assert.equal(s.latest().drained, 1); assert.equal(b.alerts.length, 1);
 });
 check('daily trigger cancels all-symbol all-magic pending orders before any position closes', () => {
-    const b = broker(), s = fixture(b); s.RGDailyLossLimit = 500; s.deal(1, -503);
+    const b = broker(), s = fixture(b); s.RGCurrentDailyLossLimit = 500; s.deal(1, -503);
     s.pos(10, 1, { magic: 0 }); s.pos(11, 2, { magic: 777, symbol: 'EURUSD' });
     b.orders.push({ ticket: 20, magic: 0, symbol: 'GBPUSD' }, { ticket: 21, magic: 777, symbol: 'BTCUSD' }); s.RGManage(42);
     assert.deepEqual(b.executions.map(e => e.kind), ['cancel', 'cancel', 'close', 'close']);
     assert.equal(b.positions.length + b.orders.length, 0); assert.ok(b.executions.every(e => e.trigger === 'daily'));
 });
 check('single-position own-magic limit spans symbols and leaves unrelated exposure intact', () => {
-    const b = broker(), s = fixture(b); s.RGPositionLossLimit = 500;
+    const b = broker(), s = fixture(b); s.RGCurrentPositionLossLimit = 500;
     s.pos(10, -500, { symbol: 'EURUSD' }); s.pos(11, -600, { symbol: 'XAUUSD', magic: 777 }); s.pos(12, -300, { swap: -200 });
     b.orders.push({ ticket: 20 }); s.RGManage(42);
     assert.deepEqual(b.executions.map(e => e.ticket).sort(), [10, 12]); assert.equal(b.orders.length, 1); assert.equal(b.positions[0].ticket, 11);
 });
 check('single-position entire-account scope includes manual and other-magic positions', () => {
-    const b = broker(), s = fixture(b); s.RGPositionLossLimit = 500; s.RGPositionScope = s.RG_ENTIRE_ACCOUNT;
+    const b = broker(), s = fixture(b); s.RGCurrentPositionLossLimit = 500; s.RGCurrentPositionScope = s.RG_ENTIRE_ACCOUNT;
     s.pos(10, -500, { magic: 0 }); s.pos(11, -500, { magic: 777 }); s.RGManage(42);
     assert.equal(b.positions.length, 0); assert.equal(b.alerts.length, 2);
 });
@@ -178,7 +179,7 @@ check('both caps disabled on a fresh install neither create a daily file nor blo
     assert.equal(s.RGCanOpen(42), true); assert.equal(b.openCalls, 0); assert.equal(b.files.size, 0); assert.equal(b.executions.length, 0);
 });
 check('single-position protection does not depend on creating an unused daily journal', () => {
-    const b = broker(), s = fixture(b); s.RGPositionLossLimit = 500; b.openOK = false; s.pos(10, -500);
+    const b = broker(), s = fixture(b); s.RGCurrentPositionLossLimit = 500; b.openOK = false; s.pos(10, -500);
     assert.equal(s.RGManage(42), true); assert.equal(b.openCalls, 0); assert.equal(b.positions.length, 0);
 });
 check('disabled caps still honor an existing daily lock after restart and recovered PnL', () => {
@@ -194,15 +195,15 @@ check('existing order-cancel latch continues without an active daily threshold',
     assert.equal(b.orders.length, 0); assert.equal(b.executions[0].kind, 'cancel');
 });
 check('a fresh trigger never sends cancellation or close attempts when durable save fails', () => {
-    const b = broker(), s = fixture(b); s.seed(); s.RGDailyLossLimit = 500; s.pos(10, -500); b.orders.push({ ticket: 20 }); b.writeOK = false;
+    const b = broker(), s = fixture(b); s.seed(); s.RGCurrentDailyLossLimit = 500; s.pos(10, -500); b.orders.push({ ticket: 20 }); b.writeOK = false;
     assert.equal(s.RGManage(42), false); assert.equal(b.executions.length, 0); assert.equal(b.alerts.length, 0); assert.equal(s.latest().locked, 0);
 });
 check('flush failure likewise blocks new trade execution attempts', () => {
-    const b = broker(), s = fixture(b); s.seed(); s.RGDailyLossLimit = 500; s.pos(10, -500); b.flushOK = false;
+    const b = broker(), s = fixture(b); s.seed(); s.RGCurrentDailyLossLimit = 500; s.pos(10, -500); b.flushOK = false;
     assert.equal(s.RGManage(42), false); assert.equal(b.executions.length, 0);
 });
 check('executor permission failure remains latched and resumes when execution becomes available', () => {
-    const b = broker(), s = fixture(b); s.RGDailyLossLimit = 500; s.pos(10, -500); b.executorAllowed = false;
+    const b = broker(), s = fixture(b); s.RGCurrentDailyLossLimit = 500; s.pos(10, -500); b.executorAllowed = false;
     assert.equal(s.RGManage(42), false); assert.equal(b.positions.length, 1); assert.equal(s.latest().locked, 1); assert.match(s.RGStatus, /算法交易未允许/);
     b.positions[0].profit = 100; b.executorAllowed = true; s.RGManage(42); assert.equal(b.positions.length, 0); assert.equal(b.alerts.length, 1);
 });
@@ -229,7 +230,7 @@ check('daily lock blocks RGCanOpen even when RR management itself is disabled', 
     assert.equal(s.RGCanOpen(42), false); assert.match(b.alerts.at(-1), /亏损保护/);
 });
 check('unavailable current history blocks fresh entry while an enabled daily cap is being checked', () => {
-    const b = broker(), s = fixture(b); s.RGDailyLossLimit = 500; b.historyOK = false;
+    const b = broker(), s = fixture(b); s.RGCurrentDailyLossLimit = 500; b.historyOK = false;
     assert.equal(s.RGCanOpen(42), false); assert.equal(b.executions.length, 0); assert.equal(s.RGSnapshotReady, false);
 });
 check('persisted daily liquidation continues even while account history is temporarily unavailable', () => {
@@ -261,18 +262,18 @@ check('corrupt day journal or future server date fails closed without sending ex
     s.seed({ day: s.RGDayStart(b.now) + 86400 }); assert.equal(s.RGManage(42), false); assert.equal(b.executions.length, 0);
 });
 check('truncated journal record is rejected and no guard execution starts', () => {
-    const b = broker(), s = fixture(b); s.seed(); b.files.get(s.RGDailyFileName()).extra = 1; s.pos(10, -1000); s.RGDailyLossLimit = 500;
+    const b = broker(), s = fixture(b); s.seed(); b.files.get(s.RGDailyFileName()).extra = 1; s.pos(10, -1000); s.RGCurrentDailyLossLimit = 500;
     assert.equal(s.RGManage(42), false); assert.equal(b.executions.length, 0);
 });
 check('account or broker changes reset cached totals and choose a different daily record', () => {
-    const b = broker(), s = fixture(b); s.RGDailyLossLimit = 500; s.deal(1, -100); s.RGManage(42); const old = s.RGDailyFileName();
+    const b = broker(), s = fixture(b); s.RGCurrentDailyLossLimit = 500; s.deal(1, -100); s.RGManage(42); const old = s.RGDailyFileName();
     b.account = 2002; b.server = 'Other'; b.deals = []; s.RGManage(42);
     assert.notEqual(s.RGDailyFileName(), old); assert.equal(s.RGRealized, 0); assert.equal(s.RGAccount, 2002);
 });
 check('input validation rejects negative nonfinite limits and unknown position scope', () => {
     const s = fixture(); assert.equal(s.RGValidateInputs(), true);
-    s.RGPositionLossLimit = -1; assert.equal(s.RGValidateInputs(), false); s.RGPositionLossLimit = 0;
-    s.RGDailyLossLimit = Infinity; assert.equal(s.RGValidateInputs(), false); s.RGDailyLossLimit = 0;
-    s.RGPositionScope = 99; assert.equal(s.RGValidateInputs(), false);
+    s.RGCurrentPositionLossLimit = -1; assert.equal(s.RGValidateInputs(), false); s.RGCurrentPositionLossLimit = 0;
+    s.RGCurrentDailyLossLimit = Infinity; assert.equal(s.RGValidateInputs(), false); s.RGCurrentDailyLossLimit = 0;
+    s.RGCurrentPositionScope = 99; assert.equal(s.RGValidateInputs(), false);
 });
 console.log(`RR guard: ${count} production-method tests passed.`);

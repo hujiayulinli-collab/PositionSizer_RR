@@ -27,7 +27,7 @@ function terminal() {
 }
 function fixture(t = terminal(), chart = 'a') {
     const s = {
-        RDEnableTradeSound: true, RDTradeSound: 'ok.wav', RDLossSound: 'alert.wav',
+        RDCurrentEnableTradeSound: true, RDCurrentTradeSound: 'ok.wav', RDCurrentLossSound: 'alert.wav',
         RDPendingDeals: [], RDPendingCursor: 0, RDAccountKey: '', RDStartedServerMs: 0,
         RDLastErrorNotice: 0, RDHasErrorNotice: false,
         ACCOUNT_SERVER: 'server', ACCOUNT_LOGIN: 'account', DEAL_TYPE: 'type', DEAL_TIME_MSC: 'time',
@@ -146,16 +146,16 @@ check('unreadable history cannot starve later ready fills beyond the bounded bat
     s.flush(); assert.equal(s.sounds().length, 1); assert.equal(s.RDPendingDeals.length, 128);
 });
 check('disabled trade sound ignores callbacks and clears queued work without disabling risk alerts', () => {
-    const s = fixture(); s.event(1); s.RDEnableTradeSound = false; s.flush(); s.event(2);
+    const s = fixture(); s.event(1); s.RDCurrentEnableTradeSound = false; s.flush(); s.event(2);
     assert.equal(s.RDPendingDeals.length, 0); s.RDPlayRiskAlert('daily loss'); assert.equal(s.sounds()[0].file, 'alert.wav');
 });
 check('missing WAV logs an actionable error without replaying the same fill endlessly', () => {
-    const t = terminal(); t.failFiles.add('missing.wav'); const s = fixture(t); s.RDTradeSound = 'missing.wav';
+    const t = terminal(); t.failFiles.add('missing.wav'); const s = fixture(t); s.RDCurrentTradeSound = 'missing.wav';
     s.event(s.add(1)); s.flush(); assert.match(t.output.find(e => e.kind === 'log').text, /Sounds.*WAV/);
     t.now += 1000; s.event(1); s.flush(); assert.equal(s.sounds().length, 1);
 });
 check('empty sound name never issues the PlaySound stop-playback sentinel', () => {
-    const t = terminal(); const s = fixture(t); s.RDTradeSound = ''; s.event(s.add(1)); s.flush();
+    const t = terminal(); const s = fixture(t); s.RDCurrentTradeSound = ''; s.event(s.add(1)); s.flush();
     assert.equal(s.sounds().length, 0); assert.match(t.output.find(e => e.kind === 'log').text, /文件为空/);
 });
 check('global variable creation failure keeps the deal queued for a safe retry', () => {
@@ -187,5 +187,15 @@ check('64-bit deal identifiers remain exact in deduplication keys', () => {
 });
 check('notification implementation has no trading or broad-history replay APIs', () => {
     assert.doesNotMatch(source, /\b(?:OrderSend|OrderSendAsync|PositionClose|PositionModify|OrderDelete|HistorySelect|HistoryDealsTotal|CTrade)\s*\(/);
+});
+check('successful submission cannot bypass the panel sound switch through the original success tone', () => {
+    const trading = readFileSync(new URL('../mt5/Position Sizer Trading.mqh', import.meta.url), 'utf8');
+    const branch = trading.match(/if \(!DisableTradingSounds && \(isOrderPlacementFailing \|\| !AtLeastOneOrderExecuted\)\)\s*PlaySound\("timeout.wav"\);/);
+    assert.ok(branch, 'Only failed submission retains its legacy tone');
+    const sounds = [];
+    const s = vm.createContext({ DisableTradingSounds: false, RDCurrentEnableTradeSound: false,
+        isOrderPlacementFailing: false, AtLeastOneOrderExecuted: true, PlaySound: file => sounds.push(file) });
+    vm.runInContext(branch[0], s); assert.deepEqual(sounds, []);
+    s.isOrderPlacementFailing = true; vm.runInContext(branch[0], s); assert.deepEqual(sounds, ['timeout.wav']);
 });
 console.log(`RR deal alerts: ${count} production-method tests passed.`);

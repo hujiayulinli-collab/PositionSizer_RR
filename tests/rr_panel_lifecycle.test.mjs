@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const production = readFileSync(new URL('../mt5/Position Sizer.mqh', import.meta.url), 'utf8')
-    + '\n' + readFileSync(new URL('../mt5/RRPlanPanel.mqh', import.meta.url), 'utf8');
+    + '\n' + readFileSync(new URL('../mt5/RRPlanPanel.mqh', import.meta.url), 'utf8')
+    + '\n' + readFileSync(new URL('../mt5/RRGuardPanel.mqh', import.meta.url), 'utf8');
 const beforeFix = readFileSync(new URL('./fixtures/panel-before-lifecycle-fix.mqh', import.meta.url), 'utf8');
 const entrySource = readFileSync(new URL('../mt5/Position Sizer RR.mq5', import.meta.url), 'utf8');
 const recoverySource = readFileSync(new URL('../mt5/RRPanelRecovery.mqh', import.meta.url), 'utf8');
@@ -42,7 +43,7 @@ function adapt(body) {
 }
 const methods = ['InitVariables', 'Maximize', 'Minimize', 'HideShowMaximize', '~CPositionSizeCalculator',
     'HideMain', 'HideRisk', 'HideMargin', 'HideSwaps', 'HideTrading'];
-const tabs = ['Main', 'Risk', 'Margin', 'Swaps', 'Trading', 'RR'];
+const tabs = ['Main', 'Risk', 'Margin', 'Swaps', 'Trading', 'RR', 'Guard'];
 const listNames = [...tabs.map(tab => `${tab}TabList`), 'PersistentList'];
 
 function fixture(source = production) {
@@ -54,6 +55,7 @@ function fixture(source = production) {
         m_controls_ready: false, m_minimized: false, NoPanelMaximization: false,
         m_rr_page: 0, m_rr_count: 0, m_rr_visible: false,
         m_rr_state: { version: 99, stage: 99 }, m_rr_loaded_plan: { count: 99 },
+        m_guard_draft: { single: 'stale' }, m_guard_saved: { single: 'stale' }, m_guard_visible: false,
         ZeroMemory: value => { for (const key of Object.keys(value)) value[key] = 0; },
         sets: { SelectedTab: 'Main', IsPanelMinimized: false, TakeProfitsNumber: 1 },
         remember_left: -1, remember_top: -1, MaxTakeProfitsNumber: 1, LinesSelectedStatus: 0,
@@ -69,6 +71,7 @@ function fixture(source = production) {
         Move: (...args) => events.push(`move:${args.join(',')}`),
         MoveAndResize: () => events.push('resize'), IniFileSave: () => events.push('ini-save'),
         CaptureRRPage: () => events.push('capture-rr-draft'),
+        CaptureGuardDraft: () => events.push('capture-guard-draft'),
         m_min_rect: { Move: (...args) => events.push(`min-rect:${args.join(',')}`) },
         m_chart: { Detach: () => events.push('detach') },
         CheckPointer: value => value && !value.deleted ? value.pointerType : 'invalid',
@@ -104,7 +107,7 @@ function fixture(source = production) {
             return true;
         },
     };
-    const functionTexts = [...methods, ...(source === production ? ['HideRR'] : [])].map(name => {
+    const functionTexts = [...methods, ...(source === production ? ['HideRR', 'HideGuard'] : [])].map(name => {
         const { body, args } = extract(source, name);
         return `function ${name.startsWith('~') ? 'PanelDestructor' : name}(${args.join(',')}) {${adapt(body)}}`;
     });
@@ -247,6 +250,18 @@ check('hiding an uncreated RR tab does not dereference its list', () => {
     const f = fixture(); f.context.HideRR();
     assert.deepEqual(f.events, []);
 });
+check('hiding the guard tab captures its draft before hiding controls', () => {
+    const f = fixture(); f.ready(); f.context.m_guard_visible = true; f.context.HideGuard();
+    assert.equal(f.events[0], 'capture-guard-draft'); assert.equal(f.context.m_guard_visible, false);
+    assert.ok(f.events.includes('hide:GuardTabList'));
+});
+check('minimizing the guard tab captures uncommitted edits before saving layout', () => {
+    const f = fixture(); f.ready(); f.context.m_guard_visible = true; f.context.Minimize();
+    assert.equal(f.events[0], 'capture-guard-draft'); assert.ok(f.events.indexOf('capture-guard-draft') < f.events.indexOf('ini-save'));
+});
+check('hiding an uncreated guard tab cannot dereference controls or a null list', () => {
+    const f = fixture(); f.context.HideGuard(); assert.deepEqual(f.events, []);
+});
 check('draft BE checkboxes never enter the generic panel layout stream', () => {
     const wrapper = /class\s+CRRPlanCheckBox\s*:\s*public\s+CCheckBox\s*\{([\s\S]*?)\};/.exec(production);
     assert.ok(wrapper, 'RR draft checkbox wrapper is missing');
@@ -264,11 +279,13 @@ function globalFunction(source, name) {
 
 check('OnInit validates RR before allocating or creating controls', () => {
     const { body } = globalFunction(entrySource, 'OnInit');
-    const validation = body.indexOf('if (!RRValidateInputs() || !RGValidateInputs()) return INIT_PARAMETERS_INCORRECT;');
+    const validation = body.indexOf('if (!RRValidateInputs()) return INIT_PARAMETERS_INCORRECT;');
     assert.ok(validation >= 0);
     assert.ok(body.indexOf('RRPanelInitSucceeded = false;') < validation);
     assert.ok(validation < body.indexOf('new CPositionSizeCalculator'));
     assert.ok(validation < body.indexOf('ExtDialog.Create('));
+    assert.ok(body.indexOf('RGUseInputDefaults();') > validation);
+    assert.ok(body.indexOf('RGInitSettings()') < body.indexOf('ExtDialog.Create('));
     assert.match(body, /if\s*\(!ExtDialog\.Create\([\s\S]*?return INIT_FAILED;/);
     assert.match(body, /if\s*\(!ExtDialog\.Run\(\)\)[\s\S]*?return INIT_FAILED;/);
     assert.ok(body.indexOf('RRPanelInitSucceeded = true;') > body.indexOf('ExtDialog.RefreshValues();'));

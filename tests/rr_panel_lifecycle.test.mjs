@@ -298,7 +298,7 @@ function deinitFixture(initialized, hasPanel, layoutExists = true) {
     const sandbox = {
         ...Object.fromEntries(constants.map(value => [value, value])),
         RRPanelInitSucceeded: initialized, DeinitializationReason: -1, POINTER_DYNAMIC: 'dynamic', NULL: null,
-        RRShutdown: () => events.push('rr-shutdown'), EventKillTimer: () => events.push('timer-stop'),
+        RRShutdown: () => events.push('rr-shutdown'), RBShutdown: () => events.push('batch-shutdown'), EventKillTimer: () => events.push('timer-stop'),
         RCCancelReverse: () => events.push('cancel-reverse-entry'),
         RCCaptureCommon: () => events.push('capture-common-settings'),
         RRDeleteTargetLines: () => events.push('clear-rr-targets'),
@@ -327,12 +327,12 @@ function deinitFixture(initialized, hasPanel, layoutExists = true) {
 }
 check('actual init-failed deinit destroys only partial panel and never saves settings', () => {
     const f = deinitFixture(false, true); f.context.OnDeinit('REASON_INITFAILED');
-    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'cancel-reverse-entry', 'timer-stop', 'destroy-panel', 'delete-panel', 'delete-prefix:12345', 'redraw']);
+    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'batch-shutdown', 'cancel-reverse-entry', 'timer-stop', 'destroy-panel', 'delete-panel', 'delete-prefix:12345', 'redraw']);
     assert.equal(f.context.ExtDialog, null); assert.equal(f.context.RRPanelInitSucceeded, false);
 });
 check('failure before allocation deinitializes without dereferencing a null panel', () => {
     const f = deinitFixture(false, false); f.context.OnDeinit('REASON_INITFAILED');
-    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'cancel-reverse-entry', 'timer-stop', 'redraw']);
+    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'batch-shutdown', 'cancel-reverse-entry', 'timer-stop', 'redraw']);
 });
 check('unfinished init skips saving even with a different deinit reason', () => {
     const f = deinitFixture(false, true); f.context.OnDeinit('REASON_PARAMETERS');

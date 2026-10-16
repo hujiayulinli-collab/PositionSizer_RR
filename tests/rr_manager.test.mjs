@@ -47,6 +47,7 @@ const constants = ['POSITION_VOLUME', 'POSITION_PRICE_OPEN', 'POSITION_TYPE', 'P
     'POSITION_SYMBOL', 'ORDER_SYMBOL', 'ORDER_SL', 'FILE_READ', 'FILE_BIN', 'INVALID_HANDLE'];
 let env;
 const context = vm.createContext({
+    RBIsChild: () => false,
     RR_MAX_TARGETS: 20,
     ...Object.fromEntries(constants.map(name => [name, name])),
     MathFloor: Math.floor, MathCeil: Math.ceil, MathAbs: Math.abs, MathMax: Math.max, MathIsValidNumber: Number.isFinite,
@@ -706,6 +707,7 @@ function multiSymbolFixture() {
         FILE_READ: 1, FILE_WRITE: 2, FILE_BIN: 4, INVALID_HANDLE: -1, SYMBOL_FILLING_FOK: 1, SYMBOL_FILLING_IOC: 2,
         RR_MAX_TARGETS: 20, RR_Enable: true, RR_BEOffsetPoints: 0, RR_DeviationPoints: 20,
         RR_FirstTarget: 2, RR_ClosePercent: 50, RR_FinalTarget: 5, RR_MoveToBE: true,
+        RBIsChild: id => b.batchChildren?.has(id) || false,
         RRAccount: 11, RRServer: 'Demo', RRLastRun: 0, RRExistingIDs: [], RRHasSnapshot: true, REASON_CHARTCHANGE: 3,
         RRActivePlan: { count: 2, targets: [{ multiple: 2, percent: 50, move_be: 1 }, { multiple: 5, percent: 50, move_be: 0 }] },
         AccountInfoInteger: () => b.account, AccountInfoString: () => b.server,
@@ -882,6 +884,12 @@ check('zero entry Magic cannot enroll a new manual position even when the panel 
         f.c.RRManage('', 0); assert.equal(f.b.sends.length, 0); assert.equal(f.b.saves.length, 0);
         assert.equal(f.b.journals.has(f.c.RRFileName(1)), emptyJournal);
     }
+});
+
+
+check('ordinary manager never captures or exits a child owned by a parent group', () => {
+    const f=multiSymbolFixture();f.add(1);f.b.batchChildren=new Set([1]);f.c.RRManage('',123);
+    assert.equal(f.b.journals.size,0);assert.equal(f.b.sends.length,0);
 });
 
 process.stdout.write(`\n${passed} manager tests passed against production management, capture, execution and reinitialization functions.\n`);

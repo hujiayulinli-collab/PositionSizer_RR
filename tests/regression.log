@@ -1,3 +1,111 @@
+PASS 1: 40 lots at 5-lot cap is eight confirmed children, never capped to broker maximum 20
+PASS 2: remaining risk shrinks the next child after adverse fills
+PASS 3: cannot exceed confirmed total even when price improves
+PASS 4: broker per-order maximum remains binding
+PASS 5: nonstep child cap floors downward
+PASS 6: fractional final child need not equal full child size
+PASS 7: risk below minimum lot stops rather than overfilling
+PASS 8: invalid budget input NaN fails closed
+PASS 9: invalid budget input negative used fails closed
+PASS 10: invalid budget input zero step fails closed
+PASS 11: invalid budget input zero risk fails closed
+PASS 12: invalid budget input infinite cap fails closed
+PASS 13: invalid budget input overshot risk fails closed
+PASS 14: spacing enforces 1000ms, independent of wall-clock second boundary
+PASS 15: clock reversal does not release spacing gate
+PASS 16: first child is eligible immediately
+PASS 17: interval settings cannot disable minimum one second
+PASS 18: invalid lot/deviation settings rejected
+PASS 19: entry submits intent first then one request with immediate SL and parent child comment
+PASS 20: unresolved prior request can never be resubmitted
+PASS 21: failed durable intent results in zero sends
+PASS 22: precheck failure has no intent and no send
+PASS 23: unknown send result leaves pending intent and stops continuation
+PASS 24: known accepted partial result still requires history confirmation
+PASS 25: definitive TRADE_RETCODE_INVALID_STOPS rejection stops without an immortal unknown intent
+PASS 26: definitive TRADE_RETCODE_NO_MONEY rejection stops without an immortal unknown intent
+PASS 27: definitive TRADE_RETCODE_LIMIT_VOLUME rejection stops without an immortal unknown intent
+PASS 28: definitive TRADE_RETCODE_HEDGE_PROHIBITED rejection stops without an immortal unknown intent
+PASS 29: inconsistent rejection containing an order ID still requires reconciliation
+PASS 30: missing or relaxed SL on previous child prevents another request
+PASS 31: latched group risk prevents another request
+PASS 32: exposure limit stops without a send
+PASS 33: adverse price deviation stops without a send
+PASS 34: favorable price change is permitted by adverse-only guard
+PASS 35: spread guard stops without a send
+PASS 36: zero remaining budget completes without sending
+PASS 37: terminal filled order is counted only once
+PASS 38: multiple fill deals aggregate actual weighted fill price
+PASS 39: cancelled partial order books only actual fills
+PASS 40: active order remains unresolved even with partial deals
+PASS 41: history/deal volume mismatch waits instead of assuming completion
+PASS 42: unknown reply finds exactly matching comment in history
+PASS 43: unknown reply without history remains pending and never sends
+PASS 44: ambiguous matching orders do not choose one
+PASS 45: mixed position IDs fail closed
+PASS 46: SL verification failure after fill records child but cancels future entries
+PASS 47: actual risk over budget freezes filled group and does not refill
+PASS 48: charged opening commissions above estimate consume actual risk budget
+PASS 49: zero-fill rejection ends queue
+PASS 50: exit plan cannot freeze while intent is unresolved
+PASS 51: cancel freezes actual weighted entry and initial group volume
+PASS 52: cold restart cancels unsubmitted children instead of resuming
+PASS 53: restart cannot cancel a queue owned by another live panel
+PASS 54: guardAllowed lost during unresolved child durably cancels continuation
+PASS 55: canTrade lost during unresolved child durably cancels continuation
+PASS 56: permission failure between confirmed children freezes exits before releasing owner
+PASS 57: account change during shutdown never creates old parent in new account namespace
+PASS 58: account change during manage releases old ownership without reading old parent in new account
+PASS 59: running second panel cancels an orphan after its owner disappears
+PASS 60: parent journal includes manual/risk exit state in checksum
+60 batch-entry checks passed.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_batch_entry.test.mjs (59.6056ms)
+PASS group 50% of two minimum children closes one full child
+PASS manual percentage uses current group remainder and freezes the target
+PASS partial execution and reload keep the original fixed target
+PASS pending child journals stop any second child reduction
+PASS external reductions count toward automatic cumulative percentages
+PASS external reduction completes a queued manual target without another close
+PASS manual target is not queued if durable parent save fails
+PASS failed child registration retains parent intent for later retry
+PASS entry in progress and ambiguous entry reject all manual exits
+PASS manual duplicate and two second debounce are rejected
+PASS invalid and substep percentages cannot create tasks
+PASS legally sized group residual is retained with min greater than step
+PASS group target never rounds above the requested percentage
+PASS zero percent BE latches without a reduction
+PASS crossing several targets persists final stage before first reduction
+PASS failed target persistence sends no child request
+PASS unfinished last percentage retains group remainder
+PASS parent net adds all realized child P/L, costs and floating losses
+PASS group loss budget cancels building and journals before emergency exits
+PASS risk latch survives reload and a price recovery
+PASS risk journal failure prevents all emergency sends
+PASS incomplete child history cannot manufacture a risk amount
+PASS active original guard has priority over group targets
+PASS disabled RR still executes explicitly queued manual exits
+PASS modified child identity blocks ordinary group management
+PASS group TP reports inconsistency as minus one
+PASS BE modifies each ticket and never loosens an existing better SL
+PASS retained remainder clears every child TP but keeps SL
+PASS failed BE is retried without sending another reduction
+PASS untradeable or invalid quote does not erase protection
+PASS plan edit preserves frozen risk basis and triggered prefix
+PASS plan edits reject stale stage/checksum and altered triggered rows
+PASS plan edits reject current child jobs and incomplete target exits
+PASS plan edit rejects newly crossed targets before durable mutation
+PASS plan edit supports tiny children by allocating group-level targets
+PASS plan save failure leaves the original target set unchanged
+PASS missing history pauses management and retries without a permanent block
+PASS add then remove between ticks remains detectable from child history
+PASS risk cannot close an enlarged or repriced child under the original parent
+PASS latched group risk closes only verified children when another child changes
+PASS risk refuses a child whose entry history was enlarged then reduced
+PASS already synchronized protection does not append idle parent records
+PASS a stop journal failure prevents this cycle from dispatching a reduction
+PASS sell targets use ask and BE preserves a better lower sell stop
+44 batch group exit checks passed
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_batch_exits.test.mjs (59.2269ms)
 PASS missing option defaults off and does not create a saved setting
 PASS verified setting survives a new panel and shares account namespace
 PASS saved option is bound to account and server
@@ -51,10 +159,14 @@ PASS fresh entry reloads account default plan saved by another panel
 PASS unreadable shared RR plan blocks fresh entry without changing the active plan
 PASS resuming reverse entry keeps its confirmed plan rather than adopting newer defaults
 PASS RR-disabled entry does not require or load a shared RR plan
+PASS active local parent blocks another entry without taking or releasing its lock
+PASS another chart account batch blocks fresh ordinary entry
+PASS another chart batch also blocks a reverse entry resuming after old positions close
+PASS a started parent retains the symbol lock until entry reconciliation completes
 
-53 central-controller tests passed against production function bodies.
+57 central-controller tests passed against production function bodies.
 Scope: in-memory options, reverse queue, positions and entry calls; no terminal files or trades.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_central.test.mjs (151.8589ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_central.test.mjs (145.5548ms)
 PASS XAU sell triggers at exact 2R tick despite frozen binary risk
 PASS XAU sell triggers at exact 5R tick despite frozen binary risk
 PASS sell Bid reaching alone does not trigger
@@ -108,7 +220,7 @@ PASS both directions: executable final price never precedes requested R
 
 50 tests passed against D:\codex\tradingIndicators\PositionSizer_RR\mt5\RRCore.mqh
 Scope: pure calculations only; terminal execution, persistence and broker behaviour require the demo scenarios in MANUAL_TESTS.md.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_core.test.mjs (43.8027ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_core.test.mjs (45.2763ms)
 ok 1 - initialization does not scan history or replay existing deals
 ok 2 - only trade DEAL_ADD callbacks enter the queue
 ok 3 - transaction callback queues work without blocking on history or playing audio
@@ -137,7 +249,7 @@ ok 25 - 64-bit deal identifiers remain exact in deduplication keys
 ok 26 - notification implementation has no trading or broad-history replay APIs
 ok 27 - successful submission cannot bypass the panel sound switch through the original success tone
 RR deal alerts: 27 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_deal_alerts.test.mjs (87.1913ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_deal_alerts.test.mjs (79.9615ms)
 ok 1 - runner entry uses TP zero while keeping the last target preview intact
 ok 2 - full-exit plan continues to install its server TP
 ok 3 - RR-disabled original entry preserves the ordinary TP
@@ -149,7 +261,7 @@ ok 8 - runner confirmation explains retained share and no server full TP
 ok 9 - full-exit confirmation uses actual passed TP rather than stale preview
 ok 10 - BE-only entry has no forced server TP and clearly retains 100 percent
 10 entry TP checks passed
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_entry_tp.test.mjs (48.5953ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_entry_tp.test.mjs (54.3324ms)
 ok 1 - threshold is inclusive and zero/nonfinite limits cannot trigger
 ok 2 - server day normalization handles midnight and unavailable time
 ok 3 - today accounting includes trade profit swap commission fee and excludes cash operations
@@ -187,7 +299,7 @@ ok 34 - truncated journal record is rejected and no guard execution starts
 ok 35 - account or broker changes reset cached totals and choose a different daily record
 ok 36 - input validation rejects negative nonfinite limits and unknown position scope
 RR guard: 36 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard.test.mjs (95.4888ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard.test.mjs (84.8113ms)
 PASS new latch saves and alarms before preflight/send with exact hedging ticket
 PASS disabled trading still latches once and resumes after permission restores
 PASS empty key cannot adopt a fresh position
@@ -236,7 +348,7 @@ PASS risk cannot send while a manual close result is unresolved
 
 45 guard execution tests passed against actual production function bodies.
 Scope: simulated MT5 file/order/position boundaries only; no terminal journals, UI operations or real trades.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_execution.test.mjs (62.4217ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_execution.test.mjs (63.0397ms)
 PASS without post-lock check, first-file race reaches both emergency and ordinary execution
 PASS production rechecks after first journal lock and suppresses ordinary exit in the race
 PASS an existing emergency latch skips ordinary journal and execution entirely
@@ -255,6 +367,7 @@ PASS actual OnTrade invalidates realized history cache before UI refresh
 PASS manual, reverse and all-symbol RR management stay ahead of the panel timer throttle
 PASS a new money block detected during reverse preflight suppresses ordinary RR in the same event
 PASS actual entry preflight checks money guard even when RR is disabled
+PASS entry reloads shared batch settings and refuses unreadable or newly enabled unsupported mode
 PASS Trade core always starts with guarded entry preflight
 PASS Trade wrapper reaches the guarded core only with the entry lock and releases it afterwards
 PASS both pending and market sends recheck daily guard after their confirmation dialog
@@ -273,9 +386,9 @@ PASS fresh pre-send entry check synchronizes a cross-chart cap update and forces
 PASS account context reset happens before settings synchronization and does not erase its failure block
 PASS initialization loads shared settings before controls and keeps the settings page recoverable on load failure
 
-35 guard integration tests passed against production functions.
+36 guard integration tests passed against production functions.
 Scope: in-memory scheduling and boundary simulation, plus source contracts for the full trading form. No live trading.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_integration.test.mjs (81.4586ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_integration.test.mjs (80.2851ms)
 PASS first init and repeated sync keep input defaults without creating a journal
 PASS explicit first save validates, flushes, reads back and publishes every setting
 PASS the POD record contains no dynamic strings and has bounded UTF-16 fields
@@ -319,7 +432,7 @@ PASS oversized invalid input defaults cannot cause an out-of-bounds restore on a
 
 40 account-settings tests passed against production function bodies.
 Scope: in-memory binary files and account context; no terminal files, UI or trades.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_settings.test.mjs (137.295ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_settings.test.mjs (133.8034ms)
 ok 1 - initial controls load all seven current saved account values
 ok 2 - typing scope and checkbox changes stay drafts without changing active settings
 ok 3 - valid explicit save applies exact draft values with the loaded revision
@@ -347,7 +460,7 @@ ok 24 - seven actual tab definitions retain legible fonts and disjoint button re
 ok 25 - explicit reload synchronizes the account record before discarding a draft
 ok 26 - draft and rendering methods do not call trading manager executors or audio playback
 RR guard UI: 26 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_ui.test.mjs (97.8195ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_ui.test.mjs (88.2343ms)
 PASS legacy scalar field order still matches the released schema
 PASS v2 retains scalar prefix and adds all 20 target slots
 PASS legacy conversion preserves every scalar and clears new target fields
@@ -383,7 +496,7 @@ PASS released v1 and full-exit v2 records retain full-exit interpretation
 
 32 journal tests passed against production save/load and conversion functions.
 Scope: binary schema and state decisions with a simulated MQL file boundary; native packing and durable storage still require terminal validation.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_journal.test.mjs (84.1081ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_journal.test.mjs (83.6177ms)
 PASS read returns frozen plan and ticket without writes
 PASS read legacy plan as two targets without migration
 PASS read never adopts a position without journal
@@ -440,7 +553,7 @@ PASS manual exit intent arising during journal lock acquisition prevents plan wr
 
 53 live-plan tests passed against production APIs.
 Scope: in-memory MT5 boundaries; no real positions, journal files, or trading requests.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_live_plan.test.mjs (74.0151ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_live_plan.test.mjs (68.1203ms)
 PASS below 2R updates stops without reducing
 PASS 2R intent is saved before requesting half close
 PASS first partial fill is topped up only to the initial half
@@ -557,10 +670,11 @@ PASS empty other-Magic journal never grants authority to capture an unrelated po
 PASS global resume requires the persisted journal Magic to match the actual position
 PASS nonempty symbol selector retains original Magic scope even for an old-Magic valid journal
 PASS zero entry Magic cannot enroll a new manual position even when the panel setting matches
+PASS ordinary manager never captures or exits a child owned by a parent group
 
-116 manager tests passed against production management, capture, execution and reinitialization functions.
+117 manager tests passed against production management, capture, execution and reinitialization functions.
 Scope: simulated MT5 boundaries; no real trading requests, terminal compilation or journal IO.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manager.test.mjs (90.9635ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manager.test.mjs (92.2109ms)
 PASS registration freezes current remaining volume and does not send a manual trade
 PASS first execution binds exact hedging ticket and persists before sending
 PASS duplicate active clicks cannot recompute percentage or create another request
@@ -609,7 +723,7 @@ PASS two completed 25 percent clicks compound remaining volume and do not close 
 
 45 manual-execution tests passed against production function bodies.
 Scope: in-memory journals, positions and broker responses; no terminal files or trades.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manual_execution.test.mjs (81.4274ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manual_execution.test.mjs (90.7682ms)
 PASS old production callback reproduces invalid RiskTabList access
 PASS old early Minimize prematurely saves panel settings
 PASS constructor initialization explicitly clears lifecycle state and all lists
@@ -653,7 +767,7 @@ PASS a user price line carrying an RR-like Caption name cannot initiate cleanup
 
 40 lifecycle tests passed; the preserved pre-fix methods reproduce the reported null-list failure.
 Scope: actual MQL panel method bodies with simulated MT5 boundaries; visual terminal checks remain necessary.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_panel_lifecycle.test.mjs (546.7541ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_panel_lifecycle.test.mjs (568.3457ms)
 PASS target limit is exactly 20
 PASS single final exit is valid
 PASS legacy two-target default is valid
@@ -714,7 +828,7 @@ PASS all 1..20 equal-share target counts handle exact step quantities
 
 57 tests passed against production RRPlan.mqh functions.
 Scope: input validation and planned quantities; broker execution and binary file durability are tested separately.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan.test.mjs (56.1338ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan.test.mjs (68.9395ms)
 ok 1 - saved plan loads R, percentage and BE independently
 ok 2 - unused rows are hidden and visible targets stay visible
 ok 3 - typing and BE edits remain a draft until save
@@ -780,8 +894,19 @@ ok 62 - choosing a manual position cannot discard an unfinished new-plan draft
 ok 63 - closed selected identity opens chooser but never falls through to another holding
 ok 64 - manual registration rejection remains visible next to action across ordinary refresh
 ok 65 - invalid manual percentage explains the input error beside the button
-RR plan UI: 65 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan_ui.test.mjs (190.3888ms)
+ok 66 - parent dropdown uses a separate negative identity and includes symbol and child ownership
+ok 67 - group manual action uses parent and total current remainder without a child request
+ok 68 - group RR save preserves parent CAS state and does not overwrite global defaults or child plans
+ok 69 - group membership prevents independent child RR edits or manual closes
+ok 70 - building group stays selected and read-only and cannot dispatch a partial close
+ok 71 - temporary unreadable group stays selected and later loads without falling into new-plan mode
+ok 72 - group refresh preserves a live edit and locks stale save after a target is triggered
+ok 73 - group selection respects unsaved child or global draft and never aliases a positive position id
+ok 74 - new-plan button deliberately exits parent selection without changing the parent or default plan
+ok 75 - inconsistent child TPs display a pending group sync without a misleading negative price
+ok 76 - parent chooser hides finished history but retains active unresolved and selected ended groups
+RR plan UI: 76 production-method tests passed.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan_ui.test.mjs (232.6901ms)
 ok 1 - shared default filename is stable across chart and trading symbol
 ok 2 - shared default is isolated by both account login and broker server
 ok 3 - filename preserves large account/chart identifiers without floating point truncation
@@ -811,7 +936,7 @@ ok 26 - different account login prevents common control application without part
 ok 27 - same login on a different broker server cannot inherit common control values
 ok 28 - subsequent capture carries the newly edited risk while each symbol keeps its own prices
 RR shared settings: 28 production-function tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_shared_settings.test.mjs (103.8466ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_shared_settings.test.mjs (92.9315ms)
 ok 1 - managed target uses frozen fill rather than current calculator entry
 ok 2 - all matching managed positions have separate names
 ok 3 - triggered target stays at original level with triggered status
@@ -840,8 +965,14 @@ ok 25 - current chart draws only its matching positions using its own tick and d
 ok 26 - invalid current symbol price step removes stale targets instead of drawing invalid prices
 ok 27 - valid old-Magic journals keep their current-chart annotations after entry Magic changes
 ok 28 - manual and unrelated positions without journals are never adopted into target annotations
-28 chart annotations checks passed
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_target_lines.test.mjs (75.2642ms)
+ok 29 - parent targets use one weighted group basis with an explicit parent label
+ok 30 - building parent suppresses misleading new-order preview until weighted basis freezes
+ok 31 - parent lines disappear after all children close
+ok 32 - inconsistent child server TPs remain marked pending and cross-symbol parents stay off chart
+ok 33 - busy parent keeps its existing lines until a confirmed closed snapshot prunes them
+ok 34 - parent runner warns while a child full TP is still pending removal
+34 chart annotations checks passed
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_target_lines.test.mjs (79.3971ms)
 ok 1 - creation loads unchecked reverse option without trading callbacks
 ok 2 - reverse checkbox applies account setting through persistence callback only
 ok 3 - failed reverse option save restores the actually applied checkbox and shows the error
@@ -854,13 +985,25 @@ ok 9 - trade-control creation leaves original calculator rows and their position
 ok 10 - reverse controls fit the panel at standard and fractional DPI
 ok 11 - position dropdown opts out of the old panel layout file stream
 ok 12 - dropdown helpers handle hidden lists with stale pressed arrows without selecting or trading
-RR trade UI: 12 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_trade_ui.test.mjs (54.3312ms)
-ℹ tests 19
+ok 13 - batch setting edits remain unapplied drafts across recurring status refresh
+ok 14 - saving valid batch settings delegates once and recalculates whole group volume only after persistence
+ok 15 - malformed or unsafe batch values cannot reach persistence or alter calculator sizing
+ok 16 - failed batch persistence retains draft and old effective values with visible error
+ok 17 - batch cancellation affects only entry queue and preserves editable settings
+ok 18 - batch progress can show parent id and fill total without replacing active drafts
+ok 19 - batch rows have no overlaps and resize reference includes all progress rows at each DPI
+ok 20 - cancel failure stays actionable and reports unfinished cancellation without claiming success
+ok 21 - trade subpages preserve edits and keep trade action while hiding irrelevant controls
+ok 22 - real trading layout stays compact on both subpages at 100 to 200 percent DPI
+ok 23 - subpage visibility honors newly inserted TP controls and historical hidden flags
+ok 24 - subpage callbacks before readiness cannot touch panel layout or selection
+RR trade UI: 24 production-method tests passed.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_trade_ui.test.mjs (89.8742ms)
+ℹ tests 21
 ℹ suites 0
-ℹ pass 19
+ℹ pass 21
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 587.4214
+ℹ duration_ms 631.7896

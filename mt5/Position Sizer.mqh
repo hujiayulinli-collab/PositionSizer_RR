@@ -75,7 +75,7 @@ private:
     CLabel           m_LblRRNumber[5], m_LblRRPrice[5], m_LblRRHeadingR, m_LblRRHeadingPercent, m_LblRRHeadingBE, m_LblRRMode, m_LblRRInfo, m_LblRRBEInfo, m_LblRRPositionInfo, m_LblRRPage, m_LblRRStatus, m_LblRRStatus2;
     int              m_rr_page, m_rr_count, m_rr_expected_stage, m_rr_live_stage;
     bool             m_rr_visible, m_rr_stale, m_rr_readonly, m_rr_dirty;
-    ulong            m_rr_position_id, m_rr_last_refresh;
+    ulong            m_rr_position_id, m_rr_group_id, m_rr_last_refresh;
     uint             m_rr_expected_checksum;
     RRState          m_rr_state;
     RRPlan           m_rr_loaded_plan;
@@ -86,9 +86,16 @@ private:
     string           m_rr_position_symbol, m_rr_position_choices;
     CLabel           m_LblRRManualInfo, m_LblRRClosePercent, m_LblRRClosePercentUnit;
 
-    CButton          m_BtnCancelReverse;
+    CButton          m_BtnCancelReverse, m_BtnTradeRegularPage, m_BtnTradeBatchPage;
+    bool             m_trade_batch_page;
     CRRPlanCheckBox   m_ChkCloseOpposite;
     CLabel           m_LblReverseStatus;
+    CRRPlanCheckBox   m_ChkBatchEnabled;
+    CEdit            m_EdtBatchLots, m_EdtBatchInterval, m_EdtBatchDeviation;
+    CButton          m_BtnBatchSave, m_BtnBatchCancel;
+    CLabel           m_LblBatchLots, m_LblBatchInterval, m_LblBatchDeviation, m_LblBatchStatus, m_LblBatchStatus2, m_LblBatchStatus3;
+    string           m_batch_feedback;
+    bool             m_batch_feedback_error;
     ulong            m_trade_controls_refresh;
 
     CButton          m_BtnTabGuard, m_BtnGuardScope, m_BtnGuardSave, m_BtnGuardReset;
@@ -225,6 +232,15 @@ private:
     void             HideRR();
     void             LoadRRDraft();
     bool             LoadRRPositionDraft(const ulong identifier);
+    bool             LoadRRGroupDraft(const ulong parent);
+    void             RefreshRRGroupStatus();
+    void             OnClickBatchSave();
+    void             OnClickBatchCancel();
+    void             RefreshBatchStatus();
+    void             OnClickTradeRegularPage();
+    void             OnClickTradeBatchPage();
+    void             RefreshTradingSubpage();
+    void             LayoutTradingSubpage();
     void             FillRRDraft(const RRPlan &plan);
     void             CaptureRRPage();
     void             RenderRRPage();
@@ -378,6 +394,10 @@ ON_EVENT(ON_CLICK, m_BtnRRNewPlan, OnClickBtnRRNewPlan)
 ON_EVENT(ON_CLICK, m_BtnRRPosition, OnClickBtnRRPosition)
 ON_EVENT(ON_CHANGE, m_CmbRRPosition, OnChangeRRPosition)
 ON_EVENT(ON_CLICK, m_BtnRRManualClose, OnClickRRManualClose)
+ON_EVENT(ON_CLICK, m_BtnBatchSave, OnClickBatchSave)
+ON_EVENT(ON_CLICK, m_BtnBatchCancel, OnClickBatchCancel)
+ON_EVENT(ON_CLICK, m_BtnTradeRegularPage, OnClickTradeRegularPage)
+ON_EVENT(ON_CLICK, m_BtnTradeBatchPage, OnClickTradeBatchPage)
 ON_EVENT(ON_CHANGE, m_ChkCloseOpposite, OnChangeCloseOpposite)
 ON_EVENT(ON_CLICK, m_BtnCancelReverse, OnClickCancelReverse)
 for (int rr_row = 0; rr_row < 5; rr_row++)
@@ -393,7 +413,7 @@ for (int rr_row = 0; rr_row < 5; rr_row++)
         CaptureRRPage();
         m_rr_dirty = true;
         RefreshRRTargetPrices();
-        if (!m_rr_stale) SetRRStatus(m_rr_position_id == 0 ? "有未保存修改；保存后用于新仓。" : "有未保存修改；图线仍为已应用方案。");
+        if (!m_rr_stale) SetRRStatus((m_rr_position_id == 0 && m_rr_group_id == 0) ? "有未保存修改；保存后用于新仓。" : "有未保存修改；图线仍为已应用方案。");
         return true;
     }
 }
@@ -538,12 +558,16 @@ void CPositionSizeCalculator::InitVariables()
     m_rr_count = 0;
     m_rr_visible = false;
     m_rr_position_id = 0;
+    m_rr_group_id = 0;
     m_rr_last_refresh = 0;
     m_rr_has_plan = true;
     m_rr_position_magic = 0;
     m_rr_position_symbol = "";
     m_rr_position_choices = "";
     m_trade_controls_refresh = 0;
+    m_trade_batch_page = false;
+    m_batch_feedback = "";
+    m_batch_feedback_error = false;
     m_rr_expected_checksum = 0;
     m_rr_expected_stage = 0;
     m_rr_live_stage = 0;
@@ -2028,10 +2052,9 @@ void CPositionSizeCalculator::MoveAndResize()
         ref_point = m_LblSwapsPerPSYearly.Top();
         break;
     case TradingTab:
-        m_ChkCloseOpposite.Move(m_ChkCloseOpposite.Left(), m_ChkAskForConfirmation.Top() + col_height);
-        m_LblReverseStatus.Move(m_LblReverseStatus.Left(), m_ChkAskForConfirmation.Top() + 2 * col_height);
-        m_BtnCancelReverse.Move(m_BtnCancelReverse.Left(), m_LblReverseStatus.Top());
-        ref_point = m_LblReverseStatus.Top();
+        LayoutTradingSubpage();
+        RefreshTradingSubpage();
+        ref_point = m_trade_batch_page ? m_LblBatchStatus3.Top() : m_LblReverseStatus.Top();
         break;
     case RRTargetsTab:
         ref_point = m_LblRRStatus2.Top();
@@ -2885,10 +2908,7 @@ void CPositionSizeCalculator::HideTrading()
 void CPositionSizeCalculator::ShowTrading()
 {
     m_BtnTabTrading.ColorBackground(CONTROLS_BUTTON_COLOR_ENABLE);
-    for (CStringForList * obj = TradingTabList.GetFirstNode(); obj != NULL; obj = TradingTabList.GetNextNode())
-    {
-        if (!obj.Hidden) obj.Obj.Show();
-    }
+    RefreshTradingSubpage();
     m_LblURL.Show();
 }
 
@@ -7728,7 +7748,7 @@ double BrokerizePositionSize(const double position_size)
     {
         return 0; // Not taking this trade, so PS = 0.
     }
-    else if ((position_size > MaxLot) && (!SurpassBrokerMaxPositionSize))
+    else if ((position_size > MaxLot) && (!SurpassBrokerMaxPositionSize) && (!RBEnabled))
     {
         return MaxLot;
     }
@@ -9280,7 +9300,7 @@ void PositionSizeToArray(double ps)
 double AdjustPositionSizeByMinMaxStep(double ps)
 {
     if (ps < MinLot) ps = MinLot;
-    else if ((ps > MaxLot) && (!SurpassBrokerMaxPositionSize)) ps = MaxLot;
+    else if ((ps > MaxLot) && (!SurpassBrokerMaxPositionSize) && (!RBEnabled)) ps = MaxLot;
     double steps = 0;
     if (LotStep != 0) steps = ps / LotStep;
     if (MathAbs(MathRound(steps) - steps) < 0.00000001) steps = MathRound(steps);

@@ -60,6 +60,7 @@ function makePanel() {
         INVALID_HANDLE: -1, FILE_READ: 1, FILE_WRITE: 2, FILE_BIN: 4, SEEK_SET: 0,
         POSITION_TYPE_BUY: 1, Long: 1, Instant: 0, _Symbol: 'TEST', SymbolForTrading: 'TEST',
         sets: defaults(), RRActivePlan: { checksum: 17 }, RR_Enable: true, ShowATROptions: false, ShowMaxParametersOnTrading: true,
+        RBEntryActive: () => env.batchActive || false, RBAccountBusy: () => env.batchBusy || false,
         RCCloseOpposite: false, RCSettingsReady: false, RCPendingStatus: '', RCReversePending: false,
         RCResuming: false, RCEntryLock: -1, RCQueuedSymbol: '', RCQueuedFingerprint: '', RCQueuedServer: '',
         RCQueuedAccount: 0, RCQueuedDirection: 0, RCQueuedVolume: 0, RCQueuedIDs: [],
@@ -482,6 +483,22 @@ check('resuming reverse entry keeps its confirmed plan rather than adopting newe
 check('RR-disabled entry does not require or load a shared RR plan', () => {
     panel.RR_Enable = false; env.planReadable = false;
     assert.equal(panel.RCTradeEnter(), true); assert.equal(env.planReads, 0); panel.RCTradeLeave();
+});
+check('active local parent blocks another entry without taking or releasing its lock', () => {
+    env.batchActive = true; assert.equal(panel.RCTradeEnter(), false); assert.equal(env.handles.size, 0);
+    assert.equal(env.requests.length, 0);
+});
+check('another chart account batch blocks fresh ordinary entry', () => {
+    env.batchBusy = true; assert.equal(panel.RCTradeEnter(), false); assert.equal(env.handles.size, 0);
+});
+check('another chart batch also blocks a reverse entry resuming after old positions close', () => {
+    env.batchBusy=true;panel.RCResuming=true;panel.RCCloseOpposite=true;panel.RCEntryLock=55;
+    assert.equal(panel.RCTradeEnter(),false);assert.equal(env.entries.length,0);
+});
+check('a started parent retains the symbol lock until entry reconciliation completes', () => {
+    assert.equal(panel.RCTradeEnter(), true); const lock = panel.RCEntryLock;
+    env.batchActive = true; panel.RCTradeLeave(); assert.equal(panel.RCEntryLock, lock); assert.ok(env.handles.has(lock));
+    env.batchActive = false; panel.RCTradeLeave(); assert.equal(panel.RCEntryLock, -1); assert.equal(env.handles.size, 0);
 });
 console.log(`\n${passed} central-controller tests passed against production function bodies.`);
 console.log('Scope: in-memory options, reverse queue, positions and entry calls; no terminal files or trades.');

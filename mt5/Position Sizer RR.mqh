@@ -5,6 +5,7 @@
 
 // Implemented by the manual-close journal module included after this engine.
 bool RMPositionExitActive(const ulong id);
+bool RBIsChild(const ulong identifier);
 
 input group "分仓止盈 / RR exit manager"
 input(name="启用分仓止盈") bool RR_Enable = true;
@@ -943,6 +944,7 @@ bool RRPlanCanEdit(const string symbol, const long magic, string &error)
         ulong ticket = PositionGetTicket(i);
         if (ticket == 0 || (symbol != "" && PositionGetString(POSITION_SYMBOL) != symbol) || PositionGetInteger(POSITION_MAGIC) != magic) continue;
         ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
+        if (RBIsChild(id)) continue; // Parent group exclusively owns child RR targets.
         string filename = RRFileName(id);
         if (!FileIsExist(filename))
         {
@@ -979,7 +981,7 @@ bool RRSwitchCanSnapshot(const long magic, string &error)
         ulong ticket = PositionGetTicket(i);
         if (ticket == 0 || PositionGetInteger(POSITION_MAGIC) != magic) continue;
         ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
-        if (RRWasExisting(id)) continue;
+        if (RRWasExisting(id) || RBIsChild(id)) continue;
         string filename = RRFileName(id);
         if (!FileIsExist(filename))
         { error = "新持仓尚未冻结止盈方案，请稍候再切换交易品种。"; return false; }
@@ -1013,6 +1015,7 @@ void RRManage(const string symbol, const long magic)
         long position_magic = PositionGetInteger(POSITION_MAGIC);
         if (symbol != "" && position_magic != magic) continue;
         ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
+        if (RBIsChild(id)) continue; // Parent group exclusively owns child RR targets.
         string filename = RRFileName(id);
         // Global management resumes every authentic existing RR journal,
         // including a former entry Magic. Only today's selected entry Magic

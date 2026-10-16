@@ -136,6 +136,7 @@ bool RCReserveEntryVolume(const double volume)
 }
 bool RCTradeEnter()
 {
+    if (RBEntryActive() || RBAccountBusy()) { Alert("正在分批开仓，请等待完成或取消剩余开仓。"); return false; }
     if (RCReversePending && !RCResuming)
     { Alert("正在平反向仓，请等待，或在交易页取消后续开仓。"); return false; }
     if (!RCLoadOption()) { Alert("反向开仓设置读取失败，暂不开新仓。"); return false; }
@@ -157,7 +158,7 @@ bool RCTradeEnter()
 }
 void RCTradeLeave()
 {
-    if (!RCReversePending && RCEntryLock != INVALID_HANDLE)
+    if (!RCReversePending && !RBEntryActive() && RCEntryLock != INVALID_HANDLE)
     { FileClose(RCEntryLock); RCEntryLock = INVALID_HANDLE; }
 }
 bool RCEntryClear()

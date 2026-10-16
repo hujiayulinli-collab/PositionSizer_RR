@@ -37,16 +37,26 @@ bool RRNettingSlotAvailable(const bool allow_reverse = false)
     return true;
 }
 
-// RR mode opens one position per request. Its initial price risk must remain
-// identifiable, which is not possible after netting an unrelated position.
+// Each broker request must retain an identifiable position and initial risk.
+// Parent batches use hedging children instead of netting unrelated exposure.
 bool RRBeforeTrade()
 {
     if (!RGCanOpen(sets.MagicNumber)) return false;
+    if (!RBLoadSettings())
+    {
+        Alert("分批设置读取失败，暂不开新仓；请核对交易页已保存设置。");
+        return false;
+    }
+    if (RBEnabled && (!RR_Enable || sets.EntryType != Instant || AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING))
+    {
+        Alert("分批开仓需要启用分仓止盈，并使用对冲账户的即时市价单。当前设置不支持分批，请关闭分批或更换订单类型。");
+        return false;
+    }
     if (!RR_Enable) return true;
     ExtDialog.RefreshValues();
     if (SymbolForTrading != _Symbol)
     {
-        Alert("RR：品种切换尚未完成，请等待主页显示新交易品种后再下单。");
+        Alert("RR：交易品种与当前图表不一致，请重新加载面板。");
         return false;
     }
     if (sets.TakeProfitsNumber != 1)
@@ -73,7 +83,7 @@ bool RRBeforeTrade()
     }
     if (SurpassBrokerMaxPositionSize)
     {
-        Alert("RR：请将 SurpassBrokerMaxPositionSize 设为 false。RR 模式不支持因超出券商单笔上限而自动拆成多笔开仓。");
+        Alert("RR：请将旧参数 SurpassBrokerMaxPositionSize 设为 false；分批开仓请使用交易页的父订单选项。");
         return false;
     }
     string plan_error;
@@ -656,6 +666,14 @@ void RCTradeCore()
         }
         if (RCQueueReverse(PositionSize)) { delete Trade; return; }
         if (closing_opposite_first) { delete Trade; Alert("原反向仓刚已变化，请重新检查并点击交易。"); return; }
+        if (RBEnabled)
+        {
+            string batch_error;
+            if (!RBQueue(PositionSize, batch_error)) Alert("分批开仓未开始：", batch_error);
+            delete Trade;
+            return;
+        }
+
 
         // Use ArrayPositionSize that has already been calculated in CalculateRiskAndPositionSize().
         // Check if they are OK.

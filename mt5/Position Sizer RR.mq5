@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.202"
-string    Version = "3.14 - RR 1.62";
+#property version   "3.210"
+string    Version = "3.14 - RR 1.70";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -27,6 +27,7 @@ string    Version = "3.14 - RR 1.62";
 #include "RRPlan.mqh"
 bool RGPositionExitLatched(const ulong identifier);
 #include "Position Sizer RR.mqh"
+#include "RRBatchTypes.mqh"
 #include "RRGuardInputs.mqh"
 #include "RRGuardSettings.mqh"
 bool RMGuardExitReady(const ulong identifier, const double volume, const double step, string &status);
@@ -39,6 +40,8 @@ bool RMGuardExitReady(const ulong identifier, const double volume, const double 
 #include "Position Sizer.mqh";
 #include "Position Sizer Trading.mqh";
 #include "RRCentral.mqh"
+#include "RRBatch.mqh"
+#include "RRBatchExits.mqh"
 
 // Default values for settings:
 double EntryLevel = 0;
@@ -225,6 +228,7 @@ int OnInit()
     RDInitAlerts();
     if (!RCLoadOption()) Print("[PS RR] 反向开仓选项读取失败，暂停开新仓。");
     SymbolForTrading = _Symbol;
+    RBInit();
     if (DeinitializationReason != REASON_CHARTCHANGE) RRClearOrphanPanels();
     if (AutoDetectDarkMode) DetectedColorMode = DetectDarkMode();
     else DetectedColorMode = DarkMode;
@@ -631,7 +635,7 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] RR 1.62 面板初始化完成。请在“亏损保护”页填写金额并保存，0 金额表示关闭。");
+    Print("[PS RR] RR 1.70 面板初始化完成。请在“亏损保护”页填写金额并保存，0 金额表示关闭。");
     return INIT_SUCCEEDED;
 }
 
@@ -640,6 +644,7 @@ void OnDeinit(const int reason)
     RRDeleteTargetLines();
     RGDeleteStatus();
     RRShutdown();
+    RBShutdown();
     RCCancelReverse();
     if (RRPanelInitSucceeded && reason == REASON_CHARTCHANGE) RCCaptureCommon();
     DeinitializationReason = reason; // Remember reason to avoid recreating the panel in the OnInit() if it is not deleted here.
@@ -716,6 +721,9 @@ void OnTick()
     if (!RRPanelInitSucceeded) return;
     bool normal_exits_allowed = RGManage(sets.MagicNumber);
     RMManage();
+    RBManageGroups();
+    RBManageEntry();
+    RCTradeLeave();
     RCManageReverse();
     if (normal_exits_allowed && !RGEntryBlocked) RRManage("", sets.MagicNumber);
     ExtDialog.RefreshValues();
@@ -1143,6 +1151,9 @@ void OnTimer()
     // behind the panel's refresh throttle.
     bool normal_exits_allowed = RGManage(sets.MagicNumber);
     RMManage();
+    RBManageGroups();
+    RBManageEntry();
+    RCTradeLeave();
     RCManageReverse();
     if (normal_exits_allowed && !RGEntryBlocked) RRManage("", sets.MagicNumber);
     RDFlushAlerts(sets.MagicNumber);

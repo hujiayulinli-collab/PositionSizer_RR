@@ -15,8 +15,11 @@ function extract(text, name) {
     const args = signature[1].split(',').map(a => a.trim().replace(/^(?:const\s+)?\w+\s+&?/, ''));
     let body = text.slice(start, end - 1)
         .replace(/\bstring retained\[\];/, 'let retained = [];')
-        .replace(/\bRRState state;/, 'let state = {};')
-        .replace(/\bRRPlan plan;/, 'let plan = {};')
+        .replace('ulong groups[];', 'let groups = [];')
+        .replace('string group_symbol, error;', 'let group_symbol, error;')
+        .replace('RBReadManagedGroup(groups[group], state, group_symbol, remaining, server_tp, error)', 'RBReadManagedGroup(groups[group], state, value => { group_symbol = value.symbol; remaining = value.remaining; server_tp = value.tp; })')
+        .replace(/\bRRState state;/g, 'let state = {};')
+        .replace(/\bRRPlan plan;/g, 'let plan = {};')
         .replace(/\b(?:string|int|ulong|long|bool|double|datetime|color)\s+(\w+)\s*;/g, 'let $1;')
         .replace(/\b(?:string|int|ulong|long|bool|double|datetime|color)\s+(?=\w+\s*=)/g, 'let ')
         .replace(/\((?:ulong|int|long|color)\)/g, '');
@@ -27,7 +30,10 @@ function fixture() {
     const plan = { count: 2, targets: [{ multiple: 2, percent: 50, move_be: 1 }, { multiple: 5, percent: 50, move_be: 0 }] };
     const ctx = {
         RRLinePrefix: 'PSRR_Targets_', RRLastLineRefresh: 0, RRLabelRows: [], RR_MAX_TARGETS: 20, RR_Enable: true,
-        _Symbol: 'XAUUSD', _Period: 5, RRActivePlan: plan,
+        _Symbol: 'XAUUSD', _Period: 5, RRActivePlan: plan, groups: [],
+        RBCollectGroups: out => { out.push(...ctx.groups.map(g=>g.id)); return out.length; },
+        RBGroupBuilding: id => ctx.groups.find(g=>g.id===id)?.building || false,
+        RBReadManagedGroup: (id, state, output) => { const g=ctx.groups.find(g=>g.id===id); if(!g || g.busy) return false; Object.assign(state, structuredClone(g.state)); output(g); return true; },
         SYMBOL_TRADE_TICK_SIZE: 1, SYMBOL_DIGITS: 2, POSITION_SYMBOL: 3, POSITION_MAGIC: 4,
         POSITION_IDENTIFIER: 5, POSITION_TP: 6, time: 1000, rows: [], positions: [], objects,
         ChartID: () => 1, GetTickCount64: () => ctx.time,
@@ -212,5 +218,38 @@ check('manual and unrelated positions without journals are never adopted into ta
     const s = fixture(); const a = s.position(42), b = s.position(43);
     a.magic = 0; a.journal = false; b.magic = 999; b.journal = false; s.positions.push(a, b); s.refresh();
     assert.ok(s.rows.every(r => r.key.includes('Preview')));
+});
+check('parent targets use one weighted group basis with an explicit parent label', () => {
+    const s=fixture(); const p=s.position(); s.groups.push({id:9001, symbol:'XAUUSD', remaining:40,tp:p.tp,state:p.state});s.refresh();
+    assert.equal(s.rows.length,2); assert.ok(s.rows.every(r=>r.key.includes('Parent_9001')));
+    assert.deepEqual(s.rows.map(r=>r.price),[4326.38,4303.34]); assert.match(s.rows[0].caption,/父组 #9001/);
+});
+check('building parent suppresses misleading new-order preview until weighted basis freezes', () => {
+    const s=fixture();s.groups.push({id:9001,symbol:'XAUUSD',remaining:5,tp:0,building:true,state:s.position().state});s.refresh();
+    assert.equal(s.rows.length,0);
+});
+check('parent lines disappear after all children close', () => {
+    const s=fixture();const g={id:9001,symbol:'XAUUSD',remaining:5,tp:0,state:s.position().state};s.groups.push(g);s.refresh();
+    assert.ok([...s.objects.keys()].some(k=>k.includes('Parent_9001')));g.remaining=0;s.refresh();
+    assert.ok([...s.objects.keys()].every(k=>!k.includes('Parent_9001')));
+});
+check('inconsistent child server TPs remain marked pending and cross-symbol parents stay off chart', () => {
+    const s=fixture();s.groups.push({id:9001,symbol:'XAUUSD',remaining:5,tp:-1,state:s.position().state});
+    s.groups.push({id:9002,symbol:'EURUSD',remaining:5,tp:0,state:s.position().state});s.refresh();
+    assert.equal(s.rows.length,2);assert.match(s.rows[1].caption,/待同步/);assert.doesNotMatch(s.rows[1].caption,/服务器TP/);
+});
+check('busy parent keeps its existing lines until a confirmed closed snapshot prunes them', () => {
+    const s=fixture();const g={id:9001,symbol:'XAUUSD',remaining:5,tp:0,state:s.position().state};
+    s.groups.push(g);s.refresh();g.busy=true;s.rows=[];s.refresh();
+    assert.ok([...s.objects.keys()].some(k=>k.includes('Parent_9001')));
+    assert.equal(s.rows.length,0);
+    g.busy=false;g.remaining=0;s.refresh();
+    assert.ok([...s.objects.keys()].every(k=>!k.includes('Parent_9001')));
+});
+check('parent runner warns while a child full TP is still pending removal', () => {
+    const s=fixture();const state=s.position().state;state.plan.targets[1].percent=25;
+    const g={id:9001,symbol:'XAUUSD',remaining:5,tp:-1,state};s.groups.push(g);s.refresh();
+    assert.match(s.rows[1].caption,/子单旧TP待取消/);
+    g.tp=0;s.rows=[];s.refresh();assert.match(s.rows[1].caption,/无全平TP/);
 });
 console.log(`${count} chart annotations checks passed`);

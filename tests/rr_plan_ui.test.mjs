@@ -17,12 +17,18 @@ function extract(name) {
     }
     const args = match[1].split(',').filter(Boolean).map(s => s.trim().split(/\s+/).at(-1).replace('&', ''));
     let body = source.slice(start, end - 1)
+        .replace(/\bulong groups\[\];/g, 'let groups = [];')
+        .replace(/\bstring group_labels\[\];/g, 'let group_labels = [];')
+        .replace(/\b(?:double|string)\s+((?:\w+,\s*)+\w+);/g, 'let $1;')
         .replace(/\bRRPlan (\w+);/g, 'let $1 = makePlan();')
         .replace(/\bRRState (\w+);/g, 'let $1 = {};')
         .replace(/\b(?:double|string|int|bool|ulong|uint|long)\s+(\w+)\s*;/g, 'let $1;')
         .replace(/\b(?:double|string|int|bool|ulong|uint|long)\s+(?=\w+\s*=)/g, 'let ')
         .replace(/\((?:int|ulong|long)\)/g, '')
         .replace(/RRReadManagedPosition\(([^;\n]+), (state|current), ticket, error\)/g, 'RRReadManagedPosition($1, $2)')
+        .replace(/RBReadManagedGroup\(([^,\n]+), (state|current), symbol, remaining, server_tp, error\)/g, 'RBReadManagedGroup($1, $2, data => {symbol = data.symbol; remaining = data.remaining; server_tp = data.server_tp; error = data.error;})')
+        .replace('RBRequestGroupClose(m_rr_group_id, percent, error)', 'RBRequestGroupClose(m_rr_group_id, percent, value => error = value)')
+        .replace('RBApplyGroupPlan(m_rr_group_id, draft, m_rr_expected_checksum, m_rr_expected_stage, error)', 'RBApplyGroupPlan(m_rr_group_id, draft, m_rr_expected_checksum, m_rr_expected_stage, value => error = value)')
         .replace('RRPlanParseNumber(m_EdtRRMultiple[row].Text(), multiple)', '((multiple = parseNumber(m_EdtRRMultiple[row].Text())) !== null)')
         .replace('RMRequestClose(m_rr_position_id, percent, sets.MagicNumber, error)', 'RMRequestClose(m_rr_position_id, percent, sets.MagicNumber, value => error = value)')
         .replace('RRPlanParseNumber(m_EdtRRClosePercent.Text(), percent)', '((percent = parseNumber(m_EdtRRClosePercent.Text())) !== null)')
@@ -75,13 +81,14 @@ function fixture(count = 2) {
         RRActivePlan: active, RR_MAX_TARGETS: 20, RR_Enable: true,
         m_rr_count: 0, m_rr_page: 0, m_rr_visible: true, m_minimized: false,
         m_rr_has_plan: true, m_rr_position_magic: 123, m_rr_position_symbol: 'AUDUSD', m_rr_position_choices: '',
-        m_controls_ready: true, m_rr_position_id: 0, m_rr_last_refresh: 0, m_rr_stale: false, m_rr_readonly: false, m_rr_dirty: false,
+        m_controls_ready: true, m_rr_position_id: 0, m_rr_group_id: 0, m_rr_last_refresh: 0, m_rr_stale: false, m_rr_readonly: false, m_rr_dirty: false,
         m_rr_expected_checksum: 0, m_rr_expected_stage: 0, m_rr_live_stage: 0, m_rr_state: {}, m_rr_loaded_plan: makePlan(),
         m_rr_multiple: Array(20).fill(''), m_rr_percent: Array(20).fill(''), m_rr_be: Array(20).fill(false),
         m_LblRRPage: new Control(), m_BtnRRPrevious: new Control(), m_BtnRRNext: new Control(), m_BtnRRAdd: new Control(),
         DoubleToString: (v, digits) => v.toFixed(digits),
         CountDecimalPlaces: value => { for (let i = 0; i < 100; i++) if (Math.abs(Math.round(value * 10 ** i) / 10 ** i - value) < 1e-8) return i; return -1; },
         IntegerToString: String, StringSubstr: (text, start, count) => (text || '').substr(start, count),
+        ArrayResize: (items, n) => { items.length = n; },
         ChartRedraw: () => {}, parseNumber, makePlan, ZeroMemory: () => {}, structuredClone,
         parseInto: (text, target, field) => { const value = parseNumber(text); if (value === null) return false; target[field] = value; return true; },
         canEdit: true, applyAllowed: true, canEditCalls: 0, applyCalls: 0, updates: [],
@@ -91,7 +98,7 @@ function fixture(count = 2) {
         SymbolInfoInteger: () => 2, SymbolInfoDouble: () => 0.01, MathAbs: Math.abs, MathMax: Math.max,
         RRTargetPrice: (direction, entry, risk, multiple) => Math.round((entry + direction * risk * multiple) * 100) / 100,
         clrDimGray: 'grey', clrDarkSlateGray: 'normal', clrFireBrick: 'error', tick: 1000, GetTickCount64: () => s.tick,
-        positions: new Map(), readable: true, positionApplyCalls: [], positionApplyAllowed: true,
+        groups: new Map(), groupReadable: true, groupApplyCalls: [], groupCloseCalls: [], positions: new Map(), readable: true, positionApplyCalls: [], positionApplyAllowed: true,
         first_column_start: 7, element_height: 20, m_DPIScale: 1, MathRound: Math.round, ALIGN_RIGHT: 1, RRTabList: [],
     };
     for (const name of ['m_LblRRNumber', 'm_LblRRPrice', 'm_EdtRRMultiple', 'm_EdtRRPercent', 'm_ChkRRBreakEven', 'm_BtnRRDelete'])
@@ -109,6 +116,25 @@ function fixture(count = 2) {
         const position = s.positions.get(id); if (!s.readable || !position || !position.plan) return false;
         assert.equal(symbol, position.symbol); assert.equal(magic, position.magic);
         Object.assign(state, structuredClone(position)); s.selected = position; return true;
+    };
+    s.RBCollectGroups = ids => { ids.push(...s.groups.keys()); return ids.length; };
+    s.RBPositionParent = id => s.positions.get(id)?.parent || 0;
+    s.RBGroupBuilding = id => !s.groupReadable || !!s.groups.get(id)?.building || !!s.groups.get(id)?.pending;
+    s.RBReadManagedGroup = (id, target, output) => {
+        const group = s.groups.get(id);
+        if (!group || !s.groupReadable) { output({ error: '父组状态暂不可读' }); return false; }
+        Object.assign(target, structuredClone(group));
+        output({ symbol: group.symbol, remaining: group.volume, server_tp: group.tp, error: '' }); return true;
+    };
+    s.RBApplyGroupPlan = (id, plan, checksum, stage, error) => {
+        s.groupApplyCalls.push({ id, plan: structuredClone(plan), checksum, stage }); const group = s.groups.get(id);
+        if (!group || group.building || !s.groupReadable || checksum !== s.RRPlanChecksum(group.plan) || stage !== group.stage) { error('父组状态已变化'); return false; }
+        group.plan = structuredClone(plan); return true;
+    };
+    s.RBRequestGroupClose = (id, percent, error) => {
+        const group = s.groups.get(id);
+        if (!group || group.building) { error('父组建仓中；请先取消剩余开仓'); return false; }
+        s.groupCloseCalls.push({ id, percent, snapshot: group.volume }); return true;
     };
     s.RRStatePlan = (state, plan) => Object.assign(plan, structuredClone(state.plan));
     s.RRPlanChecksum = plan => JSON.stringify(plan);
@@ -140,7 +166,7 @@ function fixture(count = 2) {
     s.RefreshValues = () => s.updates.push(['refresh']);
     s.SaveSettingsOnDisk = symbol => s.updates.push(['settings', symbol]);
     const context = vm.createContext(s);
-    for (const name of ['CreateRRControls', 'LoadRRDraft', 'FillRRDraft', 'LoadRRPositionDraft', 'UpdateRRModeLabels', 'CaptureRRPage', 'RenderRRPage', 'OnClickBtnRRAdd', 'OnClickBtnRRDelete',
+    for (const name of ['CreateRRControls', 'LoadRRDraft', 'FillRRDraft', 'LoadRRPositionDraft', 'LoadRRGroupDraft', 'RefreshRRGroupStatus', 'UpdateRRModeLabels', 'CaptureRRPage', 'RenderRRPage', 'OnClickBtnRRAdd', 'OnClickBtnRRDelete',
                          'RefreshRRTargetPrices', 'RefreshRRPlanSummary', 'RefreshRRLiveStatus', 'OnClickBtnRRNewPlan', 'OnClickBtnRRPosition',
                          'OnClickBtnRRPrevious', 'OnClickBtnRRNext', 'OnClickBtnRRReset', 'OnClickBtnRRSave', 'SelectRRPanelPosition',
                          'RefreshRRPositionChoices', 'OnChangeRRPosition', 'OnClickRRManualClose', 'RefreshRRManualAction'])
@@ -560,6 +586,83 @@ check('manual registration rejection remains visible next to action across ordin
 check('invalid manual percentage explains the input error beside the button', () => {
     const s = fixture(); addPosition(s); s.selectPosition(42); s.m_EdtRRClosePercent.Text('abc');
     s.OnClickRRManualClose(); assert.match(s.m_LblRRManualInfo.Text(), /大于 0/); assert.equal(s.closeCalls.length, 0);
+});
+
+
+function addGroup(s, id = 123456, overrides = {}) {
+    const plan = makePlan(); plan.count = 2;
+    plan.targets[0] = { multiple: 2, percent: 50, move_be: 1 };
+    plan.targets[1] = { multiple: 5, percent: 25, move_be: 0 };
+    const group = { identifier: id, version: 2, stage: 0, blocked: 0, symbol: 'EURUSD', magic: 777, direction: 1,
+        entry: 100, risk: 2, initial_volume: 40, volume: 40, tp: 0, building: false, plan, ...overrides };
+    s.groups.set(id, group); return group;
+}
+check('parent dropdown uses a separate negative identity and includes symbol and child ownership', () => {
+    const s = fixture(); addGroup(s); addPosition(s, 42, { parent: 123456 }); s.RefreshRRPositionChoices();
+    assert.match(s.m_CmbRRPosition.items[1].text, /EURUSD.*父ID 123456/); assert.equal(s.m_CmbRRPosition.items[1].value, -123456);
+    assert.match(s.m_CmbRRPosition.items[2].text, /子单 父123456/);
+    s.selectPosition(-123456); assert.equal(s.m_rr_group_id, 123456); assert.equal(s.m_rr_position_id, 0);
+    assert.equal(s.m_rr_position_magic, 777); assert.equal(s.m_BtnRRSave.Text(), '应用到父组');
+    assert.match(s.m_LblRRPrice[0].Text(), /104/); assert.equal(s.closeCalls.length, 0);
+});
+check('group manual action uses parent and total current remainder without a child request', () => {
+    const s = fixture(); const group = addGroup(s); s.selectPosition(-123456); group.volume = 20;
+    s.m_EdtRRClosePercent.Text('25'); s.OnClickRRManualClose();
+    assert.deepEqual(s.groupCloseCalls, [{ id: 123456, percent: 25, snapshot: 20 }]); assert.equal(s.closeCalls.length, 0);
+});
+check('group RR save preserves parent CAS state and does not overwrite global defaults or child plans', () => {
+    const s = fixture(); const group = addGroup(s); s.selectPosition(-123456); s.m_EdtRRMultiple[1].Text('8'); s.OnClickBtnRRSave();
+    assert.equal(group.plan.targets[1].multiple, 8); assert.equal(s.groupApplyCalls.length, 1); assert.equal(s.groupApplyCalls[0].id, 123456);
+    assert.equal(s.positionApplyCalls.length, 0); assert.equal(s.applyCalls, 0); assert.equal(s.m_rr_group_id, 123456);
+});
+check('group membership prevents independent child RR edits or manual closes', () => {
+    const s = fixture(); addGroup(s); addPosition(s, 42, { parent: 123456 }); s.selectPosition(42);
+    assert.equal(s.m_rr_readonly, true); assert.match(s.m_LblRRMode.Text(), /子单 父123456/);
+    s.OnClickBtnRRSave(); s.m_EdtRRClosePercent.Text('50'); s.OnClickRRManualClose();
+    assert.equal(s.positionApplyCalls.length, 0); assert.equal(s.closeCalls.length, 0); assert.match(s.status.text, /选择父ID/);
+});
+check('building group stays selected and read-only and cannot dispatch a partial close', () => {
+    const s = fixture(); const group = addGroup(s, 123456, { building: true, initial_volume: 5, volume: 5 }); s.selectPosition(-123456);
+    assert.equal(s.m_rr_group_id, 123456); assert.equal(s.m_rr_readonly, true); assert.equal(s.m_BtnRRSave.enabled, false);
+    s.m_EdtRRClosePercent.Text('25'); s.OnClickRRManualClose(); assert.equal(s.groupCloseCalls.length, 0); assert.match(s.status.text, /先取消/);
+    s.tick += 600; s.RefreshRRLiveStatus(); assert.match(s.m_LblRRPositionInfo.Text(), /建仓中.*5/);
+    group.building = false; group.initial_volume = 10; group.volume = 10; s.tick += 600; s.RefreshRRLiveStatus();
+    assert.equal(s.m_rr_group_id, 123456); assert.equal(s.m_rr_readonly, false); assert.equal(s.m_rr_state.initial_volume, 10);
+});
+check('temporary unreadable group stays selected and later loads without falling into new-plan mode', () => {
+    const s = fixture(); addGroup(s); s.groupReadable = false; s.selectPosition(-123456);
+    assert.equal(s.m_rr_group_id, 123456); assert.equal(s.m_rr_has_plan, false); assert.equal(s.m_rr_readonly, true);
+    s.OnClickBtnRRReset(); assert.equal(s.m_rr_group_id, 123456);
+    s.groupReadable = true; s.tick += 600; s.RefreshRRLiveStatus(); assert.equal(s.m_rr_has_plan, true); assert.equal(s.m_rr_group_id, 123456);
+});
+check('group refresh preserves a live edit and locks stale save after a target is triggered', () => {
+    const s = fixture(); const group = addGroup(s); s.selectPosition(-123456); s.m_EdtRRMultiple[1].Text('7..'); group.stage = 1;
+    s.tick += 600; s.RefreshRRLiveStatus(); assert.equal(s.m_EdtRRMultiple[1].Text(), '7..'); assert.equal(s.m_rr_stale, true);
+    s.OnClickBtnRRSave(); assert.equal(s.groupApplyCalls.length, 0); s.OnClickBtnRRReset(); assert.equal(s.m_rr_group_id, 123456);
+    assert.equal(s.m_rr_live_stage, 1); assert.equal(s.m_EdtRRMultiple[0].readonly, true); assert.equal(s.m_EdtRRMultiple[1].readonly, false);
+});
+check('group selection respects unsaved child or global draft and never aliases a positive position id', () => {
+    const s = fixture(); addGroup(s, 42); addPosition(s, 42); s.selectPosition(42); s.m_EdtRRMultiple[1].Text('7..'); s.selectPosition(-42);
+    assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_rr_group_id, 0); assert.equal(s.m_CmbRRPosition.Value(), 42);
+    s.OnClickBtnRRReset(); s.selectPosition(-42); assert.equal(s.m_rr_position_id, 0); assert.equal(s.m_rr_group_id, 42);
+});
+check('new-plan button deliberately exits parent selection without changing the parent or default plan', () => {
+    const s = fixture(); addGroup(s); s.selectPosition(-123456); s.OnClickBtnRRNewPlan();
+    assert.equal(s.m_rr_group_id, 0); assert.equal(s.m_CmbRRPosition.Value(), 0); assert.equal(s.groupApplyCalls.length, 0);
+});
+check('inconsistent child TPs display a pending group sync without a misleading negative price', () => {
+    const s = fixture(); addGroup(s, 123456, { tp: -1 }); s.selectPosition(-123456); s.tick += 600; s.RefreshRRLiveStatus();
+    assert.match(s.m_LblRRPositionInfo.Text(), /各子单TP待同步/);
+});
+
+check('parent chooser hides finished history but retains active unresolved and selected ended groups', () => {
+    const s = fixture(); const current = addGroup(s, 101); addGroup(s, 102, { volume: 0 });
+    const building = addGroup(s, 103, { volume: 0, building: true }); addGroup(s, 104, { volume: 0, pending: 1 });
+    s.RefreshRRPositionChoices(); assert.deepEqual(s.m_CmbRRPosition.items.map(i => i.value), [0, -101, -103, -104]);
+    s.selectPosition(-101); current.volume = 0; building.building = false; s.RefreshRRPositionChoices();
+    assert.deepEqual(s.m_CmbRRPosition.items.map(i => i.value), [0, -101, -104]);
+    assert.match(s.m_CmbRRPosition.items[1].text, /父ID 101.*已结束/); assert.equal(s.m_CmbRRPosition.Value(), -101);
+    s.OnClickBtnRRNewPlan(); s.RefreshRRPositionChoices(); assert.deepEqual(s.m_CmbRRPosition.items.map(i => i.value), [0, -104]);
 });
 
 console.log(`RR plan UI: ${count} production-method tests passed.`);

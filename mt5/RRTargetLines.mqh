@@ -183,6 +183,52 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
         }
         RRPruneTargetRows(prefix, plan.count);
     }
+    // Parent groups own one shared target grid; never draw one grid per child.
+    ulong groups[];
+    int group_count = RBCollectGroups(groups);
+    for (int group = 0; group < group_count; group++)
+    {
+        string prefix = RRLinePrefix + "Parent_" + IntegerToString(groups[group]) + "_";
+        RRState state; string group_symbol, error;
+        double remaining = 0, server_tp = 0;
+        if (!RBReadManagedGroup(groups[group], state, group_symbol, remaining, server_tp, error))
+        {
+            // A brief lock held by another chart must not erase known targets.
+            // Retain only an owner already drawn on this chart, never invent one.
+            for (int obj = ObjectsTotal(ChartID()) - 1; obj >= 0; obj--)
+            {
+                if (StringFind(ObjectName(ChartID(), obj), prefix) != 0) continue;
+                ArrayResize(retained, owners + 1);
+                retained[owners++] = prefix;
+                break;
+            }
+            continue;
+        }
+        if (group_symbol != symbol || remaining <= 0) continue;
+        ArrayResize(retained, owners + 1);
+        retained[owners++] = prefix;
+        if (RBGroupBuilding(groups[group]) || state.entry <= 0 || state.risk <= 0) continue;
+        RRPlan plan; RRStatePlan(state, plan);
+        bool closes_all = RRStateClosesAll(state);
+        double final_price = closes_all ? RRTargetPrice(state.direction, state.entry, state.risk, state.final_r, tick_size, digits) : 0;
+        bool tp_pending = closes_all ? MathAbs(server_tp - final_price) > tick_size * 0.1 : server_tp != 0;
+        string owner = "父组 #" + IntegerToString(groups[group]);
+        for (int i = 0; i < plan.count; i++)
+        {
+            bool hit = i < state.stage;
+            double price = RRTargetPrice(state.direction, state.entry, state.risk, plan.targets[i].multiple, tick_size, digits);
+            string caption = RRTargetCaption(owner, i, plan.targets[i].multiple, plan.targets[i].percent,
+                plan.targets[i].move_be != 0, price, digits, hit, closes_all && i == plan.count - 1, tp_pending, state.blocked != 0 || !RR_Enable);
+            if (!closes_all && i == plan.count - 1)
+            {
+                caption += " [计划后保留 " + RRCompactNumber(100.0 - RRPlanTotalPercent(plan)) + "%]";
+                caption += tp_pending ? " [子单旧TP待取消]" : " [无全平TP]";
+            }
+            RRDrawTarget(prefix + IntegerToString(i), price, caption,
+                RRTargetColor(hit, plan.targets[i].move_be != 0, false), hit, ordinal++);
+        }
+        RRPruneTargetRows(prefix, plan.count);
+    }
     if (owners == 0 && RR_Enable && preview_entry > 0 && preview_stop > 0
         && preview_direction * (preview_entry - preview_stop) > 0)
     {

@@ -99,7 +99,7 @@ void CPositionSizeCalculator::LoadRRDraft()
     m_rr_position_symbol = SymbolForTrading;
     m_rr_position_magic = sets.MagicNumber;
     m_CmbRRPosition.SelectByValue(0);
-    m_BtnRRManualClose.Disable();
+    RefreshRRManualAction();
     m_rr_expected_stage = 0;
     m_rr_live_stage = 0;
     m_rr_expected_checksum = 0;
@@ -149,7 +149,7 @@ bool CPositionSizeCalculator::LoadRRPositionDraft(const ulong identifier)
     m_rr_position_magic = magic;
     m_rr_has_plan = managed;
     m_CmbRRPosition.SelectByValue((long)identifier);
-    m_BtnRRManualClose.Enable();
+    RefreshRRManualAction();
     m_rr_state = state;
     m_rr_expected_checksum = RRPlanChecksum(plan);
     m_rr_expected_stage = state.stage;
@@ -362,7 +362,7 @@ void CPositionSizeCalculator::RefreshRRLiveStatus()
     if (m_rr_position_id == 0) return;
     if (!SelectRRPanelPosition(m_rr_position_id))
     {
-        m_BtnRRManualClose.Disable();
+        RefreshRRManualAction();
         m_LblRRPositionInfo.Text("持仓已关闭；请重新选择，草稿仍保留。");
         return;
     }

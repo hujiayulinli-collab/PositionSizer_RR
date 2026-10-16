@@ -202,14 +202,57 @@ void CPositionSizeCalculator::OnChangeRRClosePercent()
     if (percentage > 0) m_EdtRRClosePercent.Text(IntegerToString(percentage));
 }
 
+void CPositionSizeCalculator::RefreshRRManualAction()
+{
+    bool selected = m_rr_position_id != 0 && SelectRRPanelPosition(m_rr_position_id);
+    // The action remains clickable without a selection, but only opens a chooser.
+    m_BtnRRManualClose.Enable();
+    m_BtnRRManualClose.Text(selected ? "按比例平仓 (%)" : "先选择持仓");
+    m_LblRRManualInfo.Text(selected ? "每次按当前余仓；下方目标按初始仓位。" : "未选中有效持仓：请先选择上方订单。");
+    m_LblRRManualInfo.Color(selected ? clrDarkSlateGray : clrFireBrick);
+}
+
 void CPositionSizeCalculator::OnClickRRManualClose()
 {
+    m_CmbRRClosePercent.CloseDropDown();
+    if (m_rr_position_id == 0 || !SelectRRPanelPosition(m_rr_position_id))
+    {
+        RefreshRRManualAction();
+        CaptureRRPage();
+        if (m_rr_dirty)
+        {
+            m_LblRRManualInfo.Text("请先保存或撤销草稿，再选择持仓。");
+            SetRRStatus("请先保存或撤销草稿，再从上方列表选择持仓。", true);
+            return;
+        }
+        m_rr_position_choices = "";
+        RefreshRRPositionChoices();
+        if (PositionsTotal() == 0)
+        {
+            m_LblRRManualInfo.Text("当前账户没有持仓；挂单不属于持仓。");
+            SetRRStatus("当前账户没有可平仓持仓；未成交挂单不属于持仓。", true);
+            return;
+        }
+        SetRRStatus("请先从上方列表选择品种和订单号，再点击按比例平仓。", true);
+        m_CmbRRPosition.OpenDropDown();
+        return;
+    }
+    RefreshRRManualAction();
     double percent;
-    if (m_rr_position_id == 0) { SetRRStatus("请先从下拉列表选择要平仓的持仓。", true); return; }
     if (!RRPlanParseNumber(m_EdtRRClosePercent.Text(), percent) || percent <= 0 || percent > 100)
-    { SetRRStatus("平仓比例请输入大于 0 且不超过 100 的数字。", true); return; }
+    {
+        m_LblRRManualInfo.Text("平仓比例须大于 0 且不超过 100。");
+        m_LblRRManualInfo.Color(clrFireBrick);
+        SetRRStatus("平仓比例请输入大于 0 且不超过 100 的数字。", true); return;
+    }
     string error;
-    if (!RMRequestClose(m_rr_position_id, percent, sets.MagicNumber, error)) { SetRRStatus(error, true); return; }
-    SetRRStatus("已提交按点击时余仓的 " + DoubleToString(percent, CountDecimalPlaces(percent)) + "% 平仓；以成交回报为准。");
+    if (!RMRequestClose(m_rr_position_id, percent, sets.MagicNumber, error))
+    {
+        m_LblRRManualInfo.Text(StringSubstr(error, 0, 25));
+        m_LblRRManualInfo.Color(clrFireBrick);
+        SetRRStatus(error, true); return;
+    }
+    m_LblRRManualInfo.Text("已登记平当前余仓 " + DoubleToString(percent, CountDecimalPlaces(percent)) + "% · 等待成交");
+    SetRRStatus("已登记按点击时余仓的 " + DoubleToString(percent, CountDecimalPlaces(percent)) + "% 平仓；以成交回报为准。");
     m_rr_last_refresh = 0;
 }

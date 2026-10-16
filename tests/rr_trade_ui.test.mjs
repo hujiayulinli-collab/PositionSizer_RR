@@ -173,4 +173,23 @@ check('new dropdown controls opt out of the old panel layout file stream', () =>
     assert.match(cls, /Save\([^]*?return true;/); assert.match(cls, /Load\([^]*?return true;/);
     assert.doesNotMatch(source, /\b(?:OrderSend|RMService|Trade|RGManage|PlaySound)\s*\(/);
 });
+
+check('dropdown helpers handle hidden lists with stale pressed arrows without selecting or trading', () => {
+    for (const method of ['OpenDropDown', 'CloseDropDown']) {
+        const signature = new RegExp('bool ' + method + '\\(\\)\\s*\\{').exec(panelSource);
+        assert.ok(signature, method); let i = signature.index + signature[0].length, start = i, depth = 1;
+        for (; depth; i++) { if (panelSource[i] === '{') depth++; if (panelSource[i] === '}') depth--; }
+        const body = panelSource.slice(start, i - 1);
+        for (const visible of [false, true]) for (const pressed of [false, true]) {
+            const state = { visible, pressed, calls: 0 };
+            const boundary = { Expanded: () => state.visible, OnClickEdit: () => {
+                state.calls++; state.pressed = !state.pressed; state.visible = state.pressed; return true;
+            }};
+            vm.createContext(boundary); vm.runInContext('function action() {' + body + '}', boundary);
+            assert.equal(boundary.action(), true); assert.equal(state.visible, method === 'OpenDropDown');
+            assert.ok(state.calls <= 2);
+        }
+    }
+});
+
 console.log(`RR trade UI: ${count} production-method tests passed.`);

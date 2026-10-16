@@ -24,6 +24,7 @@ function extract(name) {
         .replace(/\((?:int|ulong|long)\)/g, '')
         .replace(/RRReadManagedPosition\(([^;\n]+), (state|current), ticket, error\)/g, 'RRReadManagedPosition($1, $2)')
         .replace('RRPlanParseNumber(m_EdtRRMultiple[row].Text(), multiple)', '((multiple = parseNumber(m_EdtRRMultiple[row].Text())) !== null)')
+        .replace('RMRequestClose(m_rr_position_id, percent, sets.MagicNumber, error)', 'RMRequestClose(m_rr_position_id, percent, sets.MagicNumber, value => error = value)')
         .replace('RRPlanParseNumber(m_EdtRRClosePercent.Text(), percent)', '((percent = parseNumber(m_EdtRRClosePercent.Text())) !== null)')
         .replace('RRPlanParseNumber(percentage, summary.targets[index].percent)', 'parseInto(percentage, summary.targets[index], "percent")')
         .replace(/m_rr_state = state;/g, 'm_rr_state = structuredClone(state);')
@@ -56,6 +57,8 @@ class Combo extends Control {
     SelectByValue(value) { this.value = value; return true; }
     Value() { return this.value; }
     Expanded() { return this.expanded || false; }
+    OpenDropDown() { this.expanded = true; this.opens = (this.opens || 0) + 1; return true; }
+    CloseDropDown() { this.expanded = false; return true; }
     Select(index) { if (arguments.length) this.value = this.items[index]?.value || 0; return this.items.find(i => i.value === this.value)?.text || ''; }
 }
 function parseNumber(text) {
@@ -78,7 +81,7 @@ function fixture(count = 2) {
         m_LblRRPage: new Control(), m_BtnRRPrevious: new Control(), m_BtnRRNext: new Control(), m_BtnRRAdd: new Control(),
         DoubleToString: (v, digits) => v.toFixed(digits),
         CountDecimalPlaces: value => { for (let i = 0; i < 100; i++) if (Math.abs(Math.round(value * 10 ** i) / 10 ** i - value) < 1e-8) return i; return -1; },
-        IntegerToString: String,
+        IntegerToString: String, StringSubstr: (text, start, count) => (text || '').substr(start, count),
         ChartRedraw: () => {}, parseNumber, makePlan, ZeroMemory: () => {}, structuredClone,
         parseInto: (text, target, field) => { const value = parseNumber(text); if (value === null) return false; target[field] = value; return true; },
         canEdit: true, applyAllowed: true, canEditCalls: 0, applyCalls: 0, updates: [],
@@ -119,7 +122,7 @@ function fixture(count = 2) {
     s.RRSelectManagedPosition = (symbol, magic, id) => s.positions.has(id);
     s.PositionGetDouble = prop => s.selected[prop];
     s.closeCalls = []; s.closeAllowed = true;
-    s.RMRequestClose = (id, percent, magic) => { s.closeCalls.push({ id, percent, magic, snapshot: s.positions.get(id)?.volume }); return s.closeAllowed; };
+    s.RMRequestClose = (id, percent, magic, error) => { if (!s.closeAllowed) error("正在等待上次平仓成交确认，请勿重复点击。"); s.closeCalls.push({ id, percent, magic, snapshot: s.positions.get(id)?.volume }); return s.closeAllowed; };
     s.RRApplyPositionPlan = (symbol, magic, id, plan, checksum, stage) => {
         s.positionApplyCalls.push({ symbol, magic, id, plan: structuredClone(plan), checksum, stage });
         const p = s.positions.get(id);
@@ -140,7 +143,7 @@ function fixture(count = 2) {
     for (const name of ['CreateRRControls', 'LoadRRDraft', 'FillRRDraft', 'LoadRRPositionDraft', 'UpdateRRModeLabels', 'CaptureRRPage', 'RenderRRPage', 'OnClickBtnRRAdd', 'OnClickBtnRRDelete',
                          'RefreshRRTargetPrices', 'RefreshRRPlanSummary', 'RefreshRRLiveStatus', 'OnClickBtnRRNewPlan', 'OnClickBtnRRPosition',
                          'OnClickBtnRRPrevious', 'OnClickBtnRRNext', 'OnClickBtnRRReset', 'OnClickBtnRRSave', 'SelectRRPanelPosition',
-                         'RefreshRRPositionChoices', 'OnChangeRRPosition', 'OnChangeRRClosePercent', 'OnClickRRManualClose'])
+                         'RefreshRRPositionChoices', 'OnChangeRRPosition', 'OnChangeRRClosePercent', 'OnClickRRManualClose', 'RefreshRRManualAction'])
         vm.runInContext(extract(name), context);
     s.selectPosition = id => { s.RefreshRRPositionChoices(); s.m_CmbRRPosition.SelectByValue(id); s.OnChangeRRPosition(); };
     s.LoadRRDraft();
@@ -465,9 +468,9 @@ check('manual action preserves an unfinished RR draft and does not submit that d
     s.m_EdtRRClosePercent.Text('50'); s.OnClickRRManualClose();
     assert.equal(s.m_EdtRRMultiple[1].Text(), '7..'); assert.equal(s.positionApplyCalls.length, 0); assert.equal(s.closeCalls.length, 1);
 });
-check('closed selection remains identifiable and disables close until another position is chosen', () => {
+check('closed selection remains identifiable and offers choosing another position without sending', () => {
     const s = fixture(); addPosition(s); s.selectPosition(42); s.positions.delete(42); s.tick += 600; s.RefreshRRLiveStatus();
-    assert.equal(s.m_BtnRRManualClose.enabled, false); assert.match(s.m_CmbRRPosition.items.at(-1).text, /已关闭/);
+    assert.equal(s.m_BtnRRManualClose.enabled, true); assert.equal(s.m_BtnRRManualClose.Text(), "先选择持仓"); assert.match(s.m_CmbRRPosition.items.at(-1).text, /已关闭/);
     assert.equal(s.m_rr_position_id, 42); s.OnClickBtnRRReset(); assert.equal(s.m_rr_position_id, 0);
 });
 check('refresh and dropdown reconstruction do not rewrite a custom manual percentage', () => {
@@ -525,4 +528,44 @@ check('shared default updates do not replace a frozen live-position editor', () 
     const s = fixture(); addPosition(s); s.selectPosition(42); s.RRActivePlan.targets[1].multiple = 8;
     s.tick += 600; s.RefreshRRLiveStatus(); assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_EdtRRMultiple[1].Text(), '5'); assert.equal(s.m_rr_stale, false);
 });
+
+check('unselected manual action is visibly actionable and opens chooser without picking an order', () => {
+    const s = fixture(); addPosition(s); addPosition(s, 99);
+    assert.equal(s.m_BtnRRManualClose.enabled, true); assert.equal(s.m_BtnRRManualClose.Text(), '先选择持仓');
+    assert.match(s.m_LblRRManualInfo.Text(), /未选中/);
+    s.m_CmbRRClosePercent.expanded = true; s.m_EdtRRClosePercent.Text('25'); s.OnClickRRManualClose();
+    assert.equal(s.m_CmbRRPosition.Expanded(), true); assert.equal(s.m_CmbRRClosePercent.Expanded(), false);
+    assert.equal(s.m_rr_position_id, 0); assert.equal(s.m_CmbRRPosition.Value(), 0);
+    assert.equal(s.closeCalls.length, 0); assert.equal(s.m_EdtRRClosePercent.Text(), '25');
+    s.m_CmbRRPosition.expanded = false; s.selectPosition(99);
+    assert.equal(s.m_BtnRRManualClose.Text(), '按比例平仓 (%)'); assert.match(s.m_LblRRManualInfo.Text(), /当前余仓/);
+    assert.equal(s.closeCalls.length, 0);
+    s.OnClickRRManualClose(); assert.equal(s.closeCalls.length, 1); assert.equal(s.closeCalls[0].id, 99);
+});
+check('no account holdings reports actionable feedback beside button without dispatching', () => {
+    const s = fixture(); s.OnClickRRManualClose();
+    assert.match(s.m_LblRRManualInfo.Text(), /没有持仓/); assert.match(s.status.text, /未成交挂单/);
+    assert.equal(s.m_CmbRRPosition.Expanded(), false); assert.equal(s.closeCalls.length, 0);
+});
+check('choosing a manual position cannot discard an unfinished new-plan draft', () => {
+    const s = fixture(); addPosition(s); s.m_EdtRRMultiple[0].Text('1..'); s.OnClickRRManualClose();
+    assert.equal(s.m_EdtRRMultiple[0].Text(), '1..'); assert.match(s.m_LblRRManualInfo.Text(), /保存或撤销/);
+    assert.equal(s.m_CmbRRPosition.Expanded(), false); assert.equal(s.closeCalls.length, 0); assert.equal(s.applyCalls, 0);
+});
+check('closed selected identity opens chooser but never falls through to another holding', () => {
+    const s = fixture(); addPosition(s); addPosition(s, 99); s.selectPosition(42); s.positions.delete(42);
+    s.OnClickRRManualClose(); assert.equal(s.m_CmbRRPosition.Expanded(), true);
+    assert.equal(s.m_rr_position_id, 42); assert.equal(s.closeCalls.length, 0);
+});
+check('manual registration rejection remains visible next to action across ordinary refresh', () => {
+    const s = fixture(); addPosition(s); s.selectPosition(42); s.m_EdtRRClosePercent.Text('25'); s.closeAllowed = false;
+    s.OnClickRRManualClose(); assert.match(s.m_LblRRManualInfo.Text(), /等待上次平仓/);
+    s.tick += 600; s.RefreshRRLiveStatus(); assert.match(s.m_LblRRManualInfo.Text(), /等待上次平仓/);
+    assert.equal(s.status.error, true);
+});
+check('invalid manual percentage explains the input error beside the button', () => {
+    const s = fixture(); addPosition(s); s.selectPosition(42); s.m_EdtRRClosePercent.Text('abc');
+    s.OnClickRRManualClose(); assert.match(s.m_LblRRManualInfo.Text(), /大于 0/); assert.equal(s.closeCalls.length, 0);
+});
+
 console.log(`RR plan UI: ${count} production-method tests passed.`);

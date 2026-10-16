@@ -486,6 +486,19 @@ check('ambiguous initial write is retained and never removed as a rejected snaps
     env.flushFails = true; assert.equal(request().accepted, false);
     assert.ok(env.files[context.RMExecutionFile(42)]); assert.equal(context.RMPositionExitActive(42), true);
 });
+check('two completed 25 percent clicks compound remaining volume and do not close original 50 percent', () => {
+    env.positions[0].volume = 1.6;
+    assert.equal(request(25).accepted, true); manage();
+    assert.equal(env.sent[0].volume, 0.4); assert.equal(saved().target_remaining, 1.2);
+    assert.equal(request(25).accepted, false, 'rapid duplicate is not a second operation');
+    env.orders = [order({ initial: 0.4 })]; env.positions[0].volume = 1.2;
+    env.now = 104; manage(); assert.equal(saved().complete, 1);
+    env.now = 107; env.resultOrder = 201;
+    assert.equal(request(25).accepted, true); manage();
+    assert.equal(env.sent.length, 2); assert.equal(env.sent[1].volume, 0.3);
+    assert.equal(saved().target_remaining, 0.9);
+    assert.ok(Math.abs((1.6 - saved().target_remaining) / 1.6 * 100 - 43.75) < 1e-8);
+});
 console.log(`\n${passed} manual-execution tests passed against production function bodies.`);
 console.log('Scope: in-memory journals, positions and broker responses; no terminal files or trades.');
 

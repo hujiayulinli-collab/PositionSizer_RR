@@ -21,6 +21,19 @@ public:
 class CRRPanelComboBox : public CComboBox
 {
 public:
+    bool OpenDropDown()
+    {
+        if (Expanded()) return true;
+        if (!OnClickEdit()) return false;
+        // The standard Show() hides the list without releasing its arrow.
+        return Expanded() ? true : OnClickEdit();
+    }
+    bool CloseDropDown()
+    {
+        if (!Expanded()) return true;
+        if (!OnClickEdit()) return false;
+        return Expanded() ? OnClickEdit() : true;
+    }
     virtual bool Save(const int file_handle) { return true; }
     virtual bool Load(const int file_handle) { return true; }
     bool Expanded()
@@ -229,6 +242,7 @@ private:
     bool             SelectRRPanelPosition(const ulong identifier);
     void             OnChangeRRClosePercent();
     void             OnClickRRManualClose();
+    void             RefreshRRManualAction();
     void             SetRRStatus(const string text, const bool error = false);
     void             OnClickBtnTabRR();
     void             OnClickBtnRRAdd();

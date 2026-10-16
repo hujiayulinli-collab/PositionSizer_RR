@@ -1,4 +1,4 @@
-// One panel, account-wide position management, and serialized reverse entries.
+// Account-wide position management and serialized reverse entries.
 #ifndef PS_RR_CENTRAL_MQH
 #define PS_RR_CENTRAL_MQH
 bool RCCloseOpposite = false;
@@ -227,17 +227,6 @@ void RCManageReverse()
     RCPendingStatus = "";
 }
 
-bool RCSwitchSymbol(string symbol, string &error)
-{
-    error = ""; StringTrimLeft(symbol); StringTrimRight(symbol);
-    if (RCReversePending) { error = "请等待反向开仓完成，或先取消后续开仓。"; return false; }
-    if (ExtDialog.HasRRDraftChanges()) { error = "请先保存或撤销分仓止盈的修改，再切换品种。"; return false; }
-    if (symbol == "" || !SymbolSelect(symbol, true)) { error = "找不到该品种，请输入券商完整代码（包括后缀）。"; return false; }
-    if (symbol == _Symbol) return true;
-    if (!ChartSetSymbolPeriod(ChartID(), symbol, (ENUM_TIMEFRAMES)Period()))
-    { error = "切换请求未成功，请稍后再试。"; return false; }
-    return true;
-}
 
 // Shared controls follow this panel across symbols. Absolute prices, instrument
 // commissions and symbol-specific stop distances retain each symbol's own file.

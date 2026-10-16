@@ -22,10 +22,9 @@ function extract(name, text = source) {
         .replace(/\b(?:const\s+)?(?:bool|string|int|uint|long|ulong|double|ENUM_ORDER_TYPE)\s+(?=[A-Za-z_]\w*\s*(?:=|;))/g, 'let ')
         .replace(/\((?:int|uint|long|ulong|ENUM_ORDER_TYPE|ENUM_TIMEFRAMES)\)/g, '')
         .replaceAll('sizeof(RCOptionRecord)', String(recordSize));
-    if (name === 'RCSetCloseOpposite' || name === 'RCSwitchSymbol') body = body.replace(/\berror\s*=/g, 'error.value =');
+    if (name === 'RCSetCloseOpposite') body = body.replace(/\berror\s*=/g, 'error.value =');
     if (name === 'RCQueueReverse') body = body.replace('let error;', 'let error = { value: "" };');
     if (name === 'RCTradeEnter') body = body.replace('let error;', 'let error = { value: "" };');
-    if (name === 'RCSwitchSymbol') body = body.replace('StringTrimLeft(symbol); StringTrimRight(symbol);', 'symbol = symbol.trim();');
     return `function ${name}(${args.join(',')}) {${body}\n}`;
 }
 const names = [...source.matchAll(/(?:bool|void|string)\s+(RC\w+)\s*\([^)]*\)\s*\{/g)].map(match => match[1]);
@@ -50,8 +49,8 @@ function reset(overrides = {}) {
         positions: [position()], orders: [], requests: [], jobs: new Map(), risk: new Set(),
         alerts: [], prints: [], tradeCalls: [], entries: [], events: [], lastError: 0,
         canTrade: true, guardAllowed: true, splitAllowed: true, preflightAllowed: true, manualAllowed: true,
-        writeFails: false, readFails: false, flushFails: false, seekFails: false, selectSymbol: true,
-        chartSwitch: true, switches: [], drafts: false, step: 0.01, slotAvailable: true,
+        writeFails: false, readFails: false, flushFails: false, seekFails: false,
+        step: 0.01, slotAvailable: true,
         sharedPlan: { checksum: 17 }, planReadable: true, planReads: 0, ...overrides };
     panel = makePanel();
 }
@@ -141,10 +140,6 @@ function makePanel() {
             env.jobs.set(id, { settled: false, pending: true }); return true;
         },
         Alert: (...args) => env.alerts.push(args), Print: (...args) => env.prints.push(args),
-        ExtDialog: { HasRRDraftChanges: () => env.drafts },
-        SymbolSelect: () => env.selectSymbol,
-        ChartID: () => 77, Period: () => 15,
-        ChartSetSymbolPeriod: (chart, symbol, period) => { env.switches.push({ chart, symbol, period }); return env.chartSwitch; },
         Trade: () => {
             env.tradeCalls.push({ volume: context.RCQueuedVolume, resuming: context.RCResuming });
             if (!context.RCTradeEnter()) return;
@@ -344,12 +339,6 @@ check('last entry barrier rejects late opposite exposure before broker submissio
     setOption(true); env.positions = []; assert.equal(panel.RCEntryClear(), true);
     env.positions = [position()]; assert.equal(panel.RCEntryClear(), false);
     env.positions = []; env.orders = [order()]; assert.equal(panel.RCEntryClear(), false);
-});
-check('switch symbol respects queued entries and unsaved RR drafts', () => {
-    const error = { value: '' }; setOption(true); queue(); assert.equal(panel.RCSwitchSymbol('OTHER', error), false);
-    panel.RCCancelReverse(); env.drafts = true; assert.equal(panel.RCSwitchSymbol('OTHER', error), false);
-    env.drafts = false; assert.equal(panel.RCSwitchSymbol(' OTHER ', error), true);
-    assert.equal(env.switches[0].symbol, 'OTHER');
 });
 check('fixed-point SL follows quotes without canceling but changing its distance cancels', () => {
     panel.sets.SLDistanceInPoints = true; setOption(true); queue();

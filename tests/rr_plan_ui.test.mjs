@@ -97,11 +97,11 @@ function fixture(count = 2) {
     for (const name of ['m_LblRRNumber', 'm_LblRRPrice', 'm_EdtRRMultiple', 'm_EdtRRPercent', 'm_ChkRRBreakEven', 'm_BtnRRDelete'])
         s[name] = Array.from({ length: 5 }, () => new Control());
     for (const name of ['m_LblRRMode', 'm_LblRRInfo', 'm_LblRRBEInfo', 'm_LblRRPositionInfo', 'm_BtnRRSave', 'm_BtnRRReset', 'm_BtnRRManualClose', 'm_EdtRRClosePercent',
-        'm_BtnRRNewPlan', 'm_BtnRRPosition', 'm_LblRRManualInfo', 'm_LblRRHeadingR', 'm_LblRRHeadingPercent', 'm_LblRRHeadingBE', 'm_LblRRStatus', 'm_LblRRStatus2']) s[name] = new Control();
+        'm_BtnRRNewPlan', 'm_BtnRRPosition', 'm_LblRRManualInfo', 'm_LblRRClosePercent', 'm_LblRRClosePercentUnit', 'm_LblRRHeadingR', 'm_LblRRHeadingPercent', 'm_LblRRHeadingBE', 'm_LblRRStatus', 'm_LblRRStatus2']) s[name] = new Control();
     for (const type of ['Label', 'Button', 'Edit', 'CheckBox', 'ComboBox']) s[type + 'Create'] = (list, control, x1, y1, x2, y2, name, text) => {
         control.rect = [x1, y1, x2, y2]; control.name = name; if (text !== undefined) control.Text(text); list.push(control); return true;
     };
-    s.m_CmbRRPosition = new Combo(); s.m_CmbRRClosePercent = new Combo();
+    s.m_CmbRRPosition = new Combo();
     s.PositionsTotal = () => s.positions.size;
     s.PositionGetTicket = index => { s.selected = [...s.positions.values()][index]; return s.selected?.ticket || 0; };
     s.PositionGetInteger = prop => s.selected[prop]; s.PositionGetString = prop => s.selected[prop];
@@ -143,7 +143,7 @@ function fixture(count = 2) {
     for (const name of ['CreateRRControls', 'LoadRRDraft', 'FillRRDraft', 'LoadRRPositionDraft', 'UpdateRRModeLabels', 'CaptureRRPage', 'RenderRRPage', 'OnClickBtnRRAdd', 'OnClickBtnRRDelete',
                          'RefreshRRTargetPrices', 'RefreshRRPlanSummary', 'RefreshRRLiveStatus', 'OnClickBtnRRNewPlan', 'OnClickBtnRRPosition',
                          'OnClickBtnRRPrevious', 'OnClickBtnRRNext', 'OnClickBtnRRReset', 'OnClickBtnRRSave', 'SelectRRPanelPosition',
-                         'RefreshRRPositionChoices', 'OnChangeRRPosition', 'OnChangeRRClosePercent', 'OnClickRRManualClose', 'RefreshRRManualAction'])
+                         'RefreshRRPositionChoices', 'OnChangeRRPosition', 'OnClickRRManualClose', 'RefreshRRManualAction'])
         vm.runInContext(extract(name), context);
     s.selectPosition = id => { s.RefreshRRPositionChoices(); s.m_CmbRRPosition.SelectByValue(id); s.OnChangeRRPosition(); };
     s.LoadRRDraft();
@@ -438,14 +438,6 @@ check('manual positions without journals expose only manual exit without invente
     assert.match(s.m_LblRRPositionInfo.Text(), /仅手动平仓/); assert.equal(s.m_BtnRRManualClose.enabled, true);
     s.OnClickBtnRRSave(); assert.equal(s.positionApplyCalls.length, 0); assert.equal(s.applyCalls, 0);
 });
-check('all preset percentages populate the editable percentage without requesting a close', () => {
-    const s = fixture(); for (const percent of [25, 50, 75, 100]) {
-        s.m_CmbRRClosePercent.SelectByValue(percent); s.OnChangeRRClosePercent(); assert.equal(s.m_EdtRRClosePercent.Text(), String(percent));
-    }
-    assert.equal(s.closeCalls.length, 0);
-    s.m_EdtRRClosePercent.Text('12.5'); s.m_CmbRRClosePercent.SelectByValue(0); s.OnChangeRRClosePercent();
-    assert.equal(s.m_EdtRRClosePercent.Text(), '12.5');
-});
 check('custom manual percentage closes the selected manual position from click-time remaining volume', () => {
     const s = fixture(); const p = addPosition(s, 99, { magic: 0, plan: null, volume: 0.32 }); s.selectPosition(99);
     s.m_EdtRRClosePercent.Text('12.5'); p.volume = 0.08; s.OnClickRRManualClose();
@@ -484,9 +476,11 @@ check('actual RR control creation keeps manual actions and all five targets insi
         assert.equal(s.CreateRRControls(), true);
         const right = s.first_column_start + Math.round(307 * scale);
         for (const control of s.RRTabList) assert.ok(control.rect[0] >= s.first_column_start && control.rect[2] <= right, control.name);
-        assert.ok(s.m_CmbRRPosition.rect[3] < s.m_CmbRRClosePercent.rect[1]);
-        assert.ok(s.m_CmbRRClosePercent.rect[2] < s.m_EdtRRClosePercent.rect[0]);
-        assert.ok(s.m_EdtRRClosePercent.rect[2] < s.m_BtnRRManualClose.rect[0]);
+        assert.ok(s.m_CmbRRPosition.rect[3] < s.m_LblRRClosePercent.rect[1]);
+        assert.ok(s.m_LblRRClosePercent.rect[2] < s.m_EdtRRClosePercent.rect[0]);
+        assert.ok(s.m_EdtRRClosePercent.rect[2] < s.m_LblRRClosePercentUnit.rect[0]);
+        assert.ok(s.m_LblRRClosePercentUnit.rect[2] < s.m_BtnRRManualClose.rect[0]);
+        assert.equal(s.m_LblRRClosePercentUnit.Text(), "%");
         assert.ok(s.m_LblRRManualInfo.rect[3] < s.m_LblRRInfo.rect[1]);
         assert.ok(s.m_LblRRPrice[4].rect[3] < s.m_BtnRRNext.rect[1]);
         assert.ok(s.m_BtnRRSave.rect[3] < s.m_LblRRStatus.rect[1]);
@@ -533,12 +527,12 @@ check('unselected manual action is visibly actionable and opens chooser without 
     const s = fixture(); addPosition(s); addPosition(s, 99);
     assert.equal(s.m_BtnRRManualClose.enabled, true); assert.equal(s.m_BtnRRManualClose.Text(), '先选择持仓');
     assert.match(s.m_LblRRManualInfo.Text(), /未选中/);
-    s.m_CmbRRClosePercent.expanded = true; s.m_EdtRRClosePercent.Text('25'); s.OnClickRRManualClose();
-    assert.equal(s.m_CmbRRPosition.Expanded(), true); assert.equal(s.m_CmbRRClosePercent.Expanded(), false);
+    s.m_EdtRRClosePercent.Text('25'); s.OnClickRRManualClose();
+    assert.equal(s.m_CmbRRPosition.Expanded(), true);
     assert.equal(s.m_rr_position_id, 0); assert.equal(s.m_CmbRRPosition.Value(), 0);
     assert.equal(s.closeCalls.length, 0); assert.equal(s.m_EdtRRClosePercent.Text(), '25');
     s.m_CmbRRPosition.expanded = false; s.selectPosition(99);
-    assert.equal(s.m_BtnRRManualClose.Text(), '按比例平仓 (%)'); assert.match(s.m_LblRRManualInfo.Text(), /当前余仓/);
+    assert.equal(s.m_BtnRRManualClose.Text(), '按比例平仓'); assert.match(s.m_LblRRManualInfo.Text(), /当前余仓/);
     assert.equal(s.closeCalls.length, 0);
     s.OnClickRRManualClose(); assert.equal(s.closeCalls.length, 1); assert.equal(s.closeCalls[0].id, 99);
 });

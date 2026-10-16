@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.201"
-string    Version = "3.14 - RR 1.61";
+#property version   "3.202"
+string    Version = "3.14 - RR 1.62";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -631,7 +631,7 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] RR 1.61 面板初始化完成。请在“亏损保护”页填写金额并保存，0 金额表示关闭。");
+    Print("[PS RR] RR 1.62 面板初始化完成。请在“亏损保护”页填写金额并保存，0 金额表示关闭。");
     return INIT_SUCCEEDED;
 }
 

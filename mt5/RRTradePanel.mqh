@@ -14,28 +14,7 @@ bool CPositionSizeCalculator::CreateTradeControlOptions()
     int x = first_column_start;
     int right = x + (int)MathRound(307 * m_DPIScale);
     int h = element_height;
-    int offset = (int)MathRound(52 * m_DPIScale);
-    // Make room above the existing calculator without changing any price controls.
-    for (CStringForList *obj = MainTabList.GetFirstNode(); obj != NULL; obj = MainTabList.GetNextNode())
-        obj.Obj.Move(obj.Obj.Left(), obj.Obj.Top() + offset);
-    int y = (int)MathRound(39 * m_DPIScale);
-    if (!ComboBoxCreate(MainTabList, m_CmbTradeSymbol, x, y, x + (int)MathRound(116 * m_DPIScale), y + h, "m_CmbTradeSymbol")) return false;
-    if (!EditCreate(MainTabList, m_EdtTradeSymbol, x + (int)MathRound(122 * m_DPIScale), y, x + (int)MathRound(226 * m_DPIScale), y + h, "m_EdtTradeSymbol", SymbolForTrading, "输入券商完整品种代码，也可从左侧选择")) return false;
-    if (!ButtonCreate(MainTabList, m_BtnSwitchSymbol, x + (int)MathRound(232 * m_DPIScale), y, right, y + h, "m_BtnSwitchSymbol", "切换品种")) return false;
-    y += (int)MathRound(24 * m_DPIScale);
-    if (!LabelCreate(MainTabList, m_LblSymbolStatus, x, y, right, y + h, "m_LblSymbolStatus", "当前图表 / 下单品种：" + SymbolForTrading)) return false;
-    m_EdtTradeSymbol.TextAlign(ALIGN_LEFT);
-    m_trade_view_symbol = SymbolForTrading;
-    m_BtnSwitchSymbol.FontSize(9);
-    m_LblSymbolStatus.FontSize(9);
-    // TP add/remove walks this list from StopPrice onward. Keep the selector
-    // before those rows so adding targets never moves it into the calculator.
-    MainTabList.MoveListElementByName("m_CmbTradeSymbol", 0);
-    MainTabList.MoveListElementByName("m_EdtTradeSymbol", 1);
-    MainTabList.MoveListElementByName("m_BtnSwitchSymbol", 2);
-    MainTabList.MoveListElementByName("m_LblSymbolStatus", 3);
-
-    y = m_ChkAskForConfirmation.Top() - ClientAreaTop() + (int)MathRound(24 * m_DPIScale);
+    int y = m_ChkAskForConfirmation.Top() - ClientAreaTop() + (int)MathRound(24 * m_DPIScale);
     if (!CheckBoxCreate(TradingTabList, m_ChkCloseOpposite, x, y, right, y + h, "m_ChkCloseOpposite", "反向开仓先平同品种全部反向仓", "包含手动单和其他 EA；确认全部平完后才继续新开仓")) return false;
     m_ChkCloseOpposite.Checked(RCCloseOpposite);
     ObjectSetInteger(m_chart_id, m_name + "m_ChkCloseOppositeLabel", OBJPROP_FONTSIZE, 9);
@@ -44,59 +23,12 @@ bool CPositionSizeCalculator::CreateTradeControlOptions()
     if (!ButtonCreate(TradingTabList, m_BtnCancelReverse, x + (int)MathRound(220 * m_DPIScale), y, right, y + h, "m_BtnCancelReverse", "取消后续开仓")) return false;
     m_LblReverseStatus.FontSize(9);
     m_BtnCancelReverse.FontSize(9);
-    RefreshTradeSymbolChoices();
     return true;
 }
 
-void CPositionSizeCalculator::RefreshTradeSymbolChoices()
-{
-    // Keep an open menu stable and let a queued selection event finish first.
-    if (m_CmbTradeSymbol.Expanded()) return;
-    if (m_CmbTradeSymbol.Value() > 0 && m_CmbTradeSymbol.Select() != m_trade_symbol_selection) return;
-    string signature = "";
-    for (int i = 0; i < SymbolsTotal(true); i++) signature += SymbolName(i, true) + "|";
-    if (signature == m_trade_symbol_choices) return;
-    m_trade_symbol_choices = signature;
-    m_CmbTradeSymbol.ItemsClear();
-    m_CmbTradeSymbol.AddItem("市场报价品种", 0);
-    for (int i = 0; i < SymbolsTotal(true); i++) m_CmbTradeSymbol.AddItem(SymbolName(i, true), i + 1);
-    // Selecting the placeholder emits ON_CHANGE, which deliberately does nothing.
-    m_CmbTradeSymbol.Select(0);
-}
 
-void CPositionSizeCalculator::OnChangeTradeSymbol()
-{
-    if (m_CmbTradeSymbol.Value() <= 0) return;
-    m_trade_symbol_selection = m_CmbTradeSymbol.Select();
-    m_EdtTradeSymbol.Text(m_trade_symbol_selection);
-}
 
-bool CPositionSizeCalculator::HasRRDraftChanges()
-{
-    if (!m_controls_ready) return false;
-    CaptureRRPage();
-    return m_rr_dirty;
-}
 
-void CPositionSizeCalculator::OnClickSwitchSymbol()
-{
-    CaptureGuardDraft();
-    if (HasRRDraftChanges() || m_guard_dirty)
-    {
-        m_LblSymbolStatus.Text("请先保存或撤销止盈 / 亏损保护草稿。");
-        m_LblSymbolStatus.Color(clrFireBrick);
-        return;
-    }
-    string symbol = m_EdtTradeSymbol.Text();
-    StringTrimLeft(symbol);
-    StringTrimRight(symbol);
-    string error;
-    bool accepted = RCSwitchSymbol(symbol, error);
-    string status = accepted ? "正在切换图表及下单品种：" + symbol : error;
-    m_LblSymbolStatus.Text(StringSubstr(status, 0, 29));
-    m_LblSymbolStatus.Color(accepted ? clrDarkSlateGray : clrFireBrick);
-    ObjectSetString(ChartID(), m_name + "m_LblSymbolStatus", OBJPROP_TOOLTIP, status);
-}
 
 void CPositionSizeCalculator::OnChangeCloseOpposite()
 {
@@ -125,14 +57,6 @@ void CPositionSizeCalculator::RefreshTradeControlStatus()
     ulong now = GetTickCount64();
     if (m_trade_controls_refresh != 0 && now - m_trade_controls_refresh < 500) return;
     m_trade_controls_refresh = now;
-    if (m_trade_view_symbol != SymbolForTrading)
-    {
-        m_trade_view_symbol = SymbolForTrading;
-        m_EdtTradeSymbol.Text(SymbolForTrading);
-        m_LblSymbolStatus.Text("当前图表 / 下单品种：" + SymbolForTrading);
-        m_LblSymbolStatus.Color(clrDarkSlateGray);
-    }
-    if (!m_minimized && sets.SelectedTab == MainTab) RefreshTradeSymbolChoices();
     m_ChkCloseOpposite.Checked(RCCloseOpposite);
     string status = RCPendingStatus;
     if (status == "") status = RCCloseOpposite ? "已启用：先平全部反向仓" : "未启用反向仓自动平仓";
@@ -196,25 +120,19 @@ void CPositionSizeCalculator::OnChangeRRPosition()
     if (!LoadRRPositionDraft(identifier)) m_CmbRRPosition.SelectByValue((long)m_rr_position_id);
 }
 
-void CPositionSizeCalculator::OnChangeRRClosePercent()
-{
-    long percentage = m_CmbRRClosePercent.Value();
-    if (percentage > 0) m_EdtRRClosePercent.Text(IntegerToString(percentage));
-}
 
 void CPositionSizeCalculator::RefreshRRManualAction()
 {
     bool selected = m_rr_position_id != 0 && SelectRRPanelPosition(m_rr_position_id);
     // The action remains clickable without a selection, but only opens a chooser.
     m_BtnRRManualClose.Enable();
-    m_BtnRRManualClose.Text(selected ? "按比例平仓 (%)" : "先选择持仓");
+    m_BtnRRManualClose.Text(selected ? "按比例平仓" : "先选择持仓");
     m_LblRRManualInfo.Text(selected ? "每次按当前余仓；下方目标按初始仓位。" : "未选中有效持仓：请先选择上方订单。");
     m_LblRRManualInfo.Color(selected ? clrDarkSlateGray : clrFireBrick);
 }
 
 void CPositionSizeCalculator::OnClickRRManualClose()
 {
-    m_CmbRRClosePercent.CloseDropDown();
     if (m_rr_position_id == 0 || !SelectRRPanelPosition(m_rr_position_id))
     {
         RefreshRRManualAction();

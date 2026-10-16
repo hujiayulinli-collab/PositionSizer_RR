@@ -13,10 +13,7 @@ function extract(name) {
         .replace(/\b(?:int|double|ulong|long|string|bool)\s+(?=\w+\s*=)/g, 'let ')
         .replace(/\((?:int|ulong|long)\)/g, '')
         .replace(/CStringForList\s*\*obj/g, 'let obj')
-        .replace('RCSwitchSymbol(symbol, error)', 'RCSwitchSymbol(symbol, value => error = value)')
-        .replace('RCSetCloseOpposite(enabled, error)', 'RCSetCloseOpposite(enabled, value => error = value)')
-        .replace('StringTrimLeft(symbol);', 'symbol = symbol.trimStart();')
-        .replace('StringTrimRight(symbol);', 'symbol = symbol.trimEnd();');
+        .replace('RCSetCloseOpposite(enabled, error)', 'RCSetCloseOpposite(enabled, value => error = value)');
     return `function ${name}() {${body}}`;
 }
 class Control {
@@ -42,18 +39,14 @@ class List {
 function fixture(scale = 1) {
     const s = {
         first_column_start: Math.round(7 * scale), element_height: Math.round(20 * scale), m_DPIScale: scale,
-        MainTabList: new List(), TradingTabList: new List(), m_chart_id: 1, m_name: 'panel', SymbolForTrading: 'AUDUSD',
-        m_trade_symbol_choices: '', m_trade_view_symbol: '', m_trade_symbol_selection: '', m_trade_controls_refresh: 0, m_controls_ready: true, tick: 1000,
-        m_minimized: false, MainTab: 'main', sets: { SelectedTab: 'main' },
-        RCCloseOpposite: false, RCReversePending: false, RCPendingStatus: '', m_rr_dirty: false, m_guard_dirty: false,
+        MainTabList: new List(), TradingTabList: new List(), m_chart_id: 1, m_name: 'panel',
+        m_trade_controls_refresh: 0, m_controls_ready: true, tick: 1000,
+        RCCloseOpposite: false, RCReversePending: false, RCPendingStatus: '',
         ALIGN_LEFT: 0, OBJPROP_FONTSIZE: 1, OBJPROP_TOOLTIP: 2, NULL: null, clrFireBrick: 'error', clrDarkSlateGray: 'normal',
         MathRound: Math.round, ClientAreaTop: () => 30, ChartID: () => 1, GetTickCount64: () => s.tick,
         ObjectSetInteger: () => {}, ObjectSetString: (_, name, prop, value) => s.tooltips.set(name, value),
-        StringSubstr: (s, from, length) => s.substr(from, length), symbols: ['AUDUSD', 'XAUUSD', 'EURUSD.a'],
-        SymbolsTotal: () => s.symbols.length, SymbolName: index => s.symbols[index], tooltips: new Map(),
-        captureCalls: 0, CaptureRRPage: () => { s.captureCalls++; }, CaptureGuardDraft: () => {},
-        switchCalls: [], optionCalls: [], cancelCalls: 0, allowSwitch: true, allowOption: true,
-        RCSwitchSymbol: (symbol, error) => { s.switchCalls.push(symbol); if (!s.allowSwitch) error('正在等待反向开仓，请先取消后续开仓。'); return s.allowSwitch; },
+        StringSubstr: (s, from, length) => s.substr(from, length), tooltips: new Map(),
+        optionCalls: [], cancelCalls: 0, allowOption: true,
         RCSetCloseOpposite: (enabled, error) => { s.optionCalls.push(enabled); if (!s.allowOption) { error('无法保存开关，请稍后重试。'); return false; } s.RCCloseOpposite = enabled; return true; },
         RCCancelReverse: () => { s.cancelCalls++; s.RCReversePending = false; s.RCPendingStatus = ''; },
     };
@@ -67,68 +60,20 @@ function fixture(scale = 1) {
     };
     s.ComboBoxCreate = (list, c, x1, y1, x2, y2, name) => s.EditCreate(list, c, x1, y1, x2, y2, name, '');
     vm.createContext(s);
-    for (const name of ['CreateTradeControlOptions', 'RefreshTradeSymbolChoices', 'OnChangeTradeSymbol', 'HasRRDraftChanges',
-        'OnClickSwitchSymbol', 'OnChangeCloseOpposite', 'OnClickCancelReverse', 'RefreshTradeControlStatus']) vm.runInContext(extract(name), s);
+    for (const name of ['CreateTradeControlOptions', 'OnChangeCloseOpposite', 'OnClickCancelReverse', 'RefreshTradeControlStatus']) vm.runInContext(extract(name), s);
     s.CreateTradeControlOptions();
     s.refresh = () => { s.tick += 501; s.RefreshTradeControlStatus(); };
     return s;
 }
 let count = 0;
 function check(name, fn) { fn(); console.log(`ok ${++count} - ${name}`); }
-check('creation loads current symbol and unchecked reverse option without trading callbacks', () => {
-    const s = fixture(); assert.equal(s.m_EdtTradeSymbol.Text(), 'AUDUSD'); assert.equal(s.m_ChkCloseOpposite.Checked(), false);
-    assert.equal(s.switchCalls.length, 0); assert.equal(s.optionCalls.length, 0); assert.equal(s.cancelCalls, 0);
-});
-check('symbol dropdown preserves broker suffixes and only writes the custom edit', () => {
-    const s = fixture(); s.m_CmbTradeSymbol.Select(3); s.OnChangeTradeSymbol();
-    assert.equal(s.m_EdtTradeSymbol.Text(), 'EURUSD.a'); assert.equal(s.switchCalls.length, 0);
-});
-check('custom symbol is trimmed and submitted only when switch is explicitly clicked', () => {
-    const s = fixture(); s.m_EdtTradeSymbol.Text(' XAUUSD.pro '); s.OnClickSwitchSymbol();
-    assert.deepEqual(s.switchCalls, ['XAUUSD.pro']); assert.match(s.m_LblSymbolStatus.Text(), /正在切换/);
-});
-check('RR draft blocks symbol switching and remains untouched', () => {
-    const s = fixture(); s.m_rr_dirty = true; s.OnClickSwitchSymbol();
-    assert.equal(s.switchCalls.length, 0); assert.equal(s.m_rr_dirty, true); assert.match(s.m_LblSymbolStatus.Text(), /先保存或撤销/);
-});
-check('risk-setting draft also blocks symbol switching so reinitialization cannot discard it', () => {
-    const s = fixture(); s.m_guard_dirty = true; s.OnClickSwitchSymbol(); assert.equal(s.switchCalls.length, 0);
-});
-check('backend rejection is reported with the full error in its tooltip', () => {
-    const s = fixture(); s.allowSwitch = false; s.OnClickSwitchSymbol(); assert.equal(s.m_LblSymbolStatus.color, 'error');
-    assert.match(s.tooltips.get('panelm_LblSymbolStatus'), /取消后续开仓/);
-});
-check('unchanged Market Watch list is not rebuilt on every quote', () => {
-    const s = fixture(); const clears = s.m_CmbTradeSymbol.clearCalls; s.refresh(); s.refresh();
-    assert.equal(s.m_CmbTradeSymbol.clearCalls, clears);
-});
-check('Market Watch changes never overwrite a typed exact symbol', () => {
-    const s = fixture(); s.m_EdtTradeSymbol.Text('BTCUSD.m'); s.symbols.push('US30'); s.refresh(); s.OnChangeTradeSymbol();
-    assert.equal(s.m_EdtTradeSymbol.Text(), 'BTCUSD.m'); assert.equal(s.m_CmbTradeSymbol.items.at(-1).text, 'US30');
-});
-check('expanded symbol dropdown and queued choice survive a concurrent Market Watch change', () => {
-    const s = fixture(); s.m_CmbTradeSymbol.expanded = true; s.symbols.push('US30'); s.refresh();
-    assert.equal(s.m_CmbTradeSymbol.items.length, 4);
-    s.m_CmbTradeSymbol.expanded = false; s.m_CmbTradeSymbol.Select(3); s.refresh();
-    assert.equal(s.m_CmbTradeSymbol.items.length, 4); assert.equal(s.m_CmbTradeSymbol.Select(), 'EURUSD.a');
-    s.OnChangeTradeSymbol(); s.refresh(); assert.equal(s.m_EdtTradeSymbol.Text(), 'EURUSD.a');
-    assert.equal(s.m_CmbTradeSymbol.items.length, 5);
-});
-check('hidden or minimized Main page does not poll the symbol inventory', () => {
-    const s = fixture(); let scans = 0; s.SymbolsTotal = () => { scans++; return s.symbols.length; };
-    s.sets.SelectedTab = 'RR'; s.refresh(); assert.equal(scans, 0);
-    s.sets.SelectedTab = 'main'; s.m_minimized = true; s.refresh(); assert.equal(scans, 0);
-    s.m_minimized = false; s.refresh(); assert.ok(scans > 0);
-});
-check('completed chart symbol change updates the preserved panel instead of showing its old symbol', () => {
-    const s = fixture(); s.m_EdtTradeSymbol.Text('XAUUSD'); s.OnClickSwitchSymbol();
-    s.SymbolForTrading = 'XAUUSD'; s.refresh(); assert.equal(s.m_EdtTradeSymbol.Text(), 'XAUUSD');
-    assert.equal(s.m_LblSymbolStatus.Text(), '当前图表 / 下单品种：XAUUSD');
-    s.SymbolForTrading = 'EURUSD.a'; s.refresh(); assert.equal(s.m_EdtTradeSymbol.Text(), 'EURUSD.a');
+check('creation loads unchecked reverse option without trading callbacks', () => {
+    const s = fixture(); assert.equal(s.m_ChkCloseOpposite.Checked(), false);
+    assert.equal(s.optionCalls.length, 0); assert.equal(s.cancelCalls, 0);
 });
 check('reverse checkbox applies account setting through persistence callback only', () => {
     const s = fixture(); s.m_ChkCloseOpposite.Checked(true); s.OnChangeCloseOpposite();
-    assert.deepEqual(s.optionCalls, [true]); assert.equal(s.RCCloseOpposite, true); assert.equal(s.switchCalls.length, 0);
+    assert.deepEqual(s.optionCalls, [true]); assert.equal(s.RCCloseOpposite, true);
 });
 check('failed reverse option save restores the actually applied checkbox and shows the error', () => {
     const s = fixture(); s.allowOption = false; s.m_ChkCloseOpposite.Checked(true); s.OnChangeCloseOpposite();
@@ -151,24 +96,22 @@ check('cancel delegates once and refreshes pending-entry status without touching
 });
 check('refresh before control creation cannot call list or account callbacks', () => {
     const s = fixture(); s.m_controls_ready = false; s.RCCloseOpposite = true; s.RefreshTradeControlStatus();
-    assert.equal(s.m_ChkCloseOpposite.Checked(), false); assert.equal(s.HasRRDraftChanges(), false); assert.equal(s.captureCalls, 0);
+    assert.equal(s.m_ChkCloseOpposite.Checked(), false); assert.equal(s.optionCalls.length, 0); assert.equal(s.cancelCalls, 0);
 });
-check('symbol selector remains before dynamic TP rows in the main list', () => {
-    const s = fixture(); assert.deepEqual(s.MainTabList.nodes.slice(0, 4).map(n => n.Name), ['m_CmbTradeSymbol', 'm_EdtTradeSymbol', 'm_BtnSwitchSymbol', 'm_LblSymbolStatus']);
-    const marker = s.MainTabList.nodes.findIndex(n => n.Name === 'm_LblStopPrice');
-    assert.ok(marker > 3); assert.equal(s.MainTabList.nodes[4].Obj.Top(), 121);
+check('trade-control creation leaves original calculator rows and their positions unchanged', () => {
+    const s = fixture(); assert.deepEqual(s.MainTabList.nodes.map(n => n.Name), ['m_LblEntryLevel', 'm_LblStopPrice', 'm_LblRiskM']);
+    for (const row of s.MainTabList.nodes) assert.deepEqual(row.Obj.rect, [7, 69, 310, 89]);
 });
-check('symbol and reverse controls fit the panel at standard and fractional DPI', () => {
+check('reverse controls fit the panel at standard and fractional DPI', () => {
     for (const scale of [1, 1.25, 1.5, 2]) {
         const s = fixture(scale); const right = s.first_column_start + Math.round(307 * scale);
-        for (const name of ['m_CmbTradeSymbol', 'm_EdtTradeSymbol', 'm_BtnSwitchSymbol', 'm_LblSymbolStatus', 'm_ChkCloseOpposite', 'm_LblReverseStatus', 'm_BtnCancelReverse'])
+        for (const name of ['m_ChkCloseOpposite', 'm_LblReverseStatus', 'm_BtnCancelReverse'])
             assert.ok(s[name].rect[0] >= s.first_column_start && s[name].rect[2] <= right, `${name} ${scale}`);
-        assert.ok(s.m_CmbTradeSymbol.rect[2] < s.m_EdtTradeSymbol.rect[0]);
-        assert.ok(s.m_EdtTradeSymbol.rect[2] < s.m_BtnSwitchSymbol.rect[0]);
+        assert.ok(s.m_LblReverseStatus.rect[2] < s.m_BtnCancelReverse.rect[0]);
         assert.equal(s.m_ChkCloseOpposite.Top(), 330 + Math.round(24 * scale));
     }
 });
-check('new dropdown controls opt out of the old panel layout file stream', () => {
+check('position dropdown opts out of the old panel layout file stream', () => {
     const cls = /class CRRPanelComboBox[^]*?\n};/.exec(panelSource)[0];
     assert.match(cls, /Save\([^]*?return true;/); assert.match(cls, /Load\([^]*?return true;/);
     assert.doesNotMatch(source, /\b(?:OrderSend|RMService|Trade|RGManage|PlaySound)\s*\(/);

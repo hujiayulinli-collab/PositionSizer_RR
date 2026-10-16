@@ -1,0 +1,15 @@
+; Load in Position Sizer RR -> Inputs -> Load.
+RR_Enable=true
+RR_FirstTarget=2.0
+RR_ClosePercent=50.0
+RR_FinalTarget=5.0
+RR_MoveToBE=true
+RR_BEOffsetPoints=0
+RR_DeviationPoints=20
+DefaultTakeProfitsNumber=1
+DefaultBreakEven=0
+DefaultTrailingStop=0
+DefaultMagicNumber=2026092201
+DefaultDoNotApplyStopLoss=false
+DefaultDoNotApplyTakeProfit=false
+SurpassBrokerMaxPositionSize=false

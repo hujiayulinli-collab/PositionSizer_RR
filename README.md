@@ -1,5 +1,9 @@
 # Position Sizer RR — MT5 分仓止盈版
 
+[下载最新版](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/latest) · [全部历史版本](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases) · [版本列表](VERSIONS.md)
+
+每个 GitHub Release 提供完整安装包、独立 EX5 和 SHA256 校验文件。源码标签保存对应版本，`main` 为当前维护内容；历史版本保留其当时的行为及问题。来源与修改范围见 [NOTICE.md](NOTICE.md)，上游许可证见 [LICENSE.md](LICENSE.md)。
+
 当前版本：**RR 1.71**（MT5 文件版本 3.211）。持仓的每条未触发 TP 线可单独拖到指定价格，松开即保存，自动换算 R，保留该目标的平仓比例和 BE 设置。继续保留父组分批开仓、页面设置、账户持仓选择和亏损保护。
 
 基于你提供的 EarnForex Position Sizer 3.14 中文源码扩展。保留仓位计算、风险百分比、图表入场/止损线和下单面板，增加多目标自动退出。原参考目录没有修改。

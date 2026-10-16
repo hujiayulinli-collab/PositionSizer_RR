@@ -1,0 +1,18 @@
+# 版本发布约定
+
+公开仓库：https://github.com/hujiayulinli-collab/PositionSizer_RR
+
+`main` 保存当前项目，每个正式版本使用独立标签（例如 `v1.71`）与同名 GitHub Release。历史标签、源码快照和已发布安装包不覆盖；修复应增加新版本。
+
+发布内容：
+
+- `PositionSizer_RR_v版本.zip`：源码、EX5、说明、测试与编译记录，包含上游 `LICENSE.md` 和衍生版本 `NOTICE.md`。
+- `PositionSizer_RR_v版本.ex5`：与该版本安装包内的编译产物完全一致，下载后安装为 `Position Sizer RR.ex5`。
+- `PositionSizer_RR_v版本.sha256`：以上两个文件的 SHA256。
+- Release 说明：本版变更、安装方法与已经完成/尚未完成的验证。
+
+历史版本从原安装包导入 Git；提交时间是导入时间。公开安装包仅补充许可证及修改说明，原包中已有文件保持原样。`RELEASE_MANIFEST.json` 同时记录原包与公开包的校验值，以及对应源码提交，便于核对。
+
+后续发布先更新版本号与说明，运行相应检查并编译，核对源码、EX5和安装包，再提交、创建新标签并上传 Release。设置新版本为 latest，旧版本仍保留下载入口。不要上传 `.build/`、终端账户配置、持仓日志或登录凭证；不要把历史测试记录写成新版本已通过的测试。
+
+当前维护目录就是本仓库的本地 Git 工作目录，已保留现有全部源文件。

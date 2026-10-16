@@ -1,0 +1,271 @@
+PASS buy reaches 2R at executable Bid
+PASS buy Ask crossing alone does not reach 2R
+PASS sell reaches 2R at executable Ask
+PASS sell Bid crossing alone does not reach 2R
+PASS buy loss has negative R
+PASS sell loss has negative R
+PASS zero risk does not divide by zero
+PASS negative risk is rejected
+PASS gap past final target reports more than 5R
+PASS buy 5R target
+PASS sell 5R target
+PASS buy target rounds outwards to tick
+PASS sell target rounds outwards to tick
+PASS already aligned target does not gain a tick
+PASS one lot closes half
+PASS 0.1 lots closes half despite binary precision
+PASS odd lot count rounds partial quantity down
+PASS previous reduction counts toward half
+PASS decimal previous reduction counts toward half
+PASS achieved half is not closed again
+PASS more than half already reduced is not closed again
+PASS minimum lot cannot be split
+PASS partial below broker minimum is rejected
+PASS remainder below broker minimum is rejected
+PASS whole-lot contract respects lot step
+PASS zero lot step is rejected
+PASS zero minimum is rejected
+PASS zero percent is rejected
+PASS 100 percent is not treated as a partial
+PASS zero-offset buy BE is entry
+PASS buy BE offset is profitable
+PASS sell BE offset is profitable
+PASS buy BE on fractional entry rounds to profitable side
+PASS sell BE on fractional entry rounds to profitable side
+PASS missing stop does not protect BE
+PASS buy stop at BE protects it
+PASS sell stop at BE protects it
+PASS stronger buy stop should not be weakened
+PASS stronger sell stop should not be weakened
+PASS buy stop one tick short of BE is not protected
+PASS sell stop one tick short of BE is not protected
+PASS all whole-step partial sizes preserve minimum, step and idempotence
+PASS both directions: executable final price never precedes requested R
+
+43 tests passed against D:\codex\tradingIndicators\PositionSizer_RR\mt5\RRCore.mqh
+Scope: pure calculations only; terminal execution, persistence and broker behaviour require the demo scenarios in MANUAL_TESTS.md.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_core.test.mjs (44.1893ms)
+PASS legacy scalar field order still matches the released schema
+PASS v2 retains scalar prefix and adds all 20 target slots
+PASS legacy conversion preserves every scalar and clears new target fields
+PASS v1 save writes legacy bytes and v1 load restores pending close intent
+PASS v1 append keeps the released record size and reads its last state
+PASS v1 final-target latch survives reload
+PASS v2 save and reload freeze every target and pending field
+PASS v2 reads latest complete append, never the initial stage
+PASS all unused target slots are checksum protected
+PASS BE trigger and last stop request participate in checksum
+PASS record for another position is rejected
+PASS unknown journal version is rejected
+PASS checksum mismatch in a complete record is rejected
+PASS torn v1 trailing record is rejected rather than replaying an old intent
+PASS torn v2 trailing record is rejected rather than replaying an old intent
+PASS empty and undersized files are rejected
+PASS invalid risk, entry and initial volume fail validation despite valid checksum
+PASS invalid stage or pending flag is rejected
+PASS v1 stage values above its original state machine are rejected
+PASS invalid v2 target count is rejected before accessing target arrays
+PASS v2 final R must agree with the frozen last target
+PASS v2 plan is revalidated during journal load
+PASS short write fails and its torn journal is not accepted
+PASS flush error prevents reporting a successful state save
+PASS seek failure does not append or claim success
+
+25 journal tests passed against production save/load and conversion functions.
+Scope: binary schema and state decisions with a simulated MQL file boundary; native packing and durable storage still require terminal validation.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_journal.test.mjs (56.3422ms)
+PASS below 2R updates stops without reducing
+PASS 2R intent is saved before requesting half close
+PASS first partial fill is topped up only to the initial half
+PASS confirmed half moves to BE stage and does not close twice
+PASS reload after completed partial keeps fixed risk and no second close
+PASS gap beyond 5R bypasses first-stage partial
+PASS latched final stage keeps attempting the remaining quantity
+PASS sell Bid crossing 2R cannot trigger before Ask
+PASS sell Ask crossing 2R triggers first reduction
+PASS unsplittable minimum lot stays before BE
+PASS unsplittable minimum lot can still exit at final target
+PASS persistence failure before first trigger prevents close
+PASS persistence failure before final trigger prevents close
+PASS unknown pending result prevents both repeated close and BE
+PASS active close order is not counted as completed
+PASS filled order still waits for position volume confirmation
+PASS filled order plus reduced volume clears pending and sets BE stage
+PASS missing result order ticket recovers exact comment and magic
+PASS different magic cannot clear an ambiguous pending intent
+PASS cancelled IOC order accounts for filled portion then tops up
+PASS extra opening deal freezes netting plan even after volume returns
+PASS direction reversal freezes old state
+PASS changed entry freezes old risk
+PASS already blocked state never modifies or closes
+PASS stage zero installs fixed final TP while preserving initial SL
+PASS stage one cannot apply BE before reduction confirmed
+PASS stage two applies buy BE and final TP
+PASS stage two applies sell BE and final TP
+PASS existing more profitable stop is not weakened
+PASS BE offset uses points and rounds outward to tick
+PASS freeze restriction defers BE without altering initial SL
+PASS stop modification save failure sends no request
+PASS already correct SL and TP create neither request nor journal write
+PASS failed BE retry is throttled and never submits a close
+PASS multi zero-percent BE target is latched without reducing volume
+PASS multi target percent is measured against initial volume
+PASS multi gap accumulates crossed targets into one reduction
+PASS multi gap to final closes entire remainder
+PASS multi later target accounts for already completed prior reductions
+PASS multi repeated tick after completed reduction does not close twice
+PASS multi rounded cumulative targets prevent repeated per-node rounding loss
+PASS multi 34/33/33 of 0.03 lots closes 0.01 at each cumulative target
+PASS multi manual partial reduction counts toward cumulative goal
+PASS multi BE trigger and reduction target survive a retracement
+PASS multi pending reduction does not swallow later BE trigger
+PASS multi pending reduction does not swallow final target before retracement
+PASS multi unknown request remains pending while stops can advance
+PASS multi partial IOC fill tops up only cumulative amount still needed
+PASS multi trigger save failure prevents BE request and close
+PASS multi untradeable partial volume still activates selected BE
+PASS multi one-target plan closes all volume at its target
+PASS multi twenty targets are processed in one gap safely
+PASS multi sell target uses Ask and does not fire early
+PASS multi sell targets accumulate when Ask crosses threshold
+PASS multi opening additions block both closes and BE changes
+PASS multi stage alone does not set BE when no selected target was hit
+PASS multi zero-percent first target applies BE before any reduction
+PASS multi BE with a pending close still applies stop independently
+PASS multi BE protection never weakens a better existing stop
+PASS multi BE blocked by freeze distance retries after price recovers
+PASS plan edit is allowed when no same-strategy order or new position exists
+PASS plan edit is blocked while same-strategy pending order exists
+PASS plan edit ignores pending orders belonging to another strategy
+PASS plan edit is blocked between a new fill and its first saved capture
+PASS plan edit ignores historical positions that were never adopted
+PASS plan edit is allowed after new position has a valid frozen journal
+PASS plan edit is blocked for incomplete journal even if position existed at startup
+PASS plan edit is blocked for locked journal or mismatching recorded magic
+PASS plan edit ignores positions outside symbol and magic scope
+PASS new capture freezes complete target list and actual initial risk
+PASS editing active plan cannot change already captured position plan
+PASS capture refuses arbitrary historical positions and incomplete opening fills
+PASS capture uses new-position initial stop only when history order has none
+PASS capture refuses positions without a protective initial stop
+
+74 manager tests passed against production RRProcess/RRProcessMulti/RRResolvePending/RRUpdateStops/RRCapture/RRPlanCanEdit.
+Scope: simulated MT5 boundaries; no real trading requests, terminal compilation or journal IO.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manager.test.mjs (46.3819ms)
+PASS old production callback reproduces invalid RiskTabList access
+PASS old early Minimize prematurely saves panel settings
+PASS constructor initialization explicitly clears lifecycle state and all lists
+PASS new base Create maximize callback cannot touch uncreated controls
+PASS new base Create minimize callback cannot save incomplete settings
+PASS HideShowMaximize before ready is inert
+PASS real Create orders base callback before list creation without crashing
+PASS failed InitObjects revokes readiness
+PASS partial construction failures remain callable and safely destructible
+PASS ready Maximize still hides all tabs and shows each selected tab
+PASS ready Minimize saves once and preserves remembered coordinates
+PASS ready HideShowMaximize preserves minimized panel state
+PASS Destroy revokes readiness before base destruction and subsequent callbacks
+PASS destructor frees all dynamic lists once and handles an empty repeated cleanup
+PASS hiding the RR tab captures its draft before hiding controls
+PASS hiding an uncreated RR tab does not dereference its list
+PASS draft BE checkboxes never enter the generic panel layout stream
+PASS OnInit validates RR before allocating or creating controls
+PASS actual init-failed deinit destroys only partial panel and never saves settings
+PASS failure before allocation deinitializes without dereferencing a null panel
+PASS unfinished init skips saving even with a different deinit reason
+PASS successful parameter reinitialization still preserves user settings
+PASS successful chart change preserves panel object for reuse
+PASS normal removal skips missing layout file without warning
+PASS normal removal deletes an existing layout exactly once
+PASS actual IniFileName isolates charts and preserves full-width chart identifiers
+PASS actual IniFileName does not depend on captions, version changes or caption path characters
+PASS recovery accepts only exactly five ASCII digits as a panel prefix
+PASS recovery requires the RR caption and exact Caption object shape
+PASS recovery leaves other panel prefixes and unrelated drawings alone
+PASS recovery permits only GUI object types, excluding price lines and drawings
+PASS actual orphan cleanup deletes RR shell while preserving original panel and user drawings
+PASS failed ObjectDelete cannot trap initialization in an endless cleanup loop
+PASS a user price line carrying an RR-like Caption name cannot initiate cleanup
+
+34 lifecycle tests passed; the preserved pre-fix methods reproduce the reported null-list failure.
+Scope: actual MQL panel method bodies with simulated MT5 boundaries; visual terminal checks remain necessary.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_panel_lifecycle.test.mjs (366.108ms)
+PASS target limit is exactly 20
+PASS single final exit is valid
+PASS legacy two-target default is valid
+PASS zero-percent BE node is valid
+PASS multiple zero-percent BE nodes are valid
+PASS 20 targets are valid
+PASS empty plan is rejected
+PASS negative target count is rejected
+PASS more than 20 targets is rejected
+PASS R must be strictly positive
+PASS negative R is rejected
+PASS equal R targets are rejected
+PASS descending R targets are rejected
+PASS nonfinite R values are rejected
+PASS negative percentages are rejected
+PASS percentages above 100 are rejected
+PASS nonfinite percentages are rejected
+PASS zero-percent row without BE is rejected
+PASS invalid BE flag is rejected
+PASS percentages below 100 are rejected
+PASS percentages above 100 are rejected
+PASS decimal percentages with a valid total pass
+PASS tiny total rounding error is tolerated
+PASS material total error is rejected
+PASS 100 percent before the final row is rejected
+PASS unreachable trailing BE-only node is rejected
+PASS single final exit accepts the minimum lot
+PASS BE-only node does not require a partial close lot
+PASS two-target minimum lot split is rejected
+PASS two-target two-step volume can split
+PASS cumulative percentages distribute fractional steps
+PASS positive target rounding to zero is rejected
+PASS zero BE row between reductions preserves cumulative allocation
+PASS each nonzero stage must satisfy broker minimum
+PASS remainder below minimum is rejected
+PASS whole-contract volume is supported
+PASS 20 executable target quantities are accepted
+PASS invalid or nonfinite volume parameters are rejected
+PASS invalid plan cannot bypass volume checks
+PASS plain and fractional numbers parse
+PASS empty, malformed, signed or decorated numbers are rejected
+PASS numeric overflow is rejected
+PASS parsing does not itself ban zero used for BE rows
+PASS defaults preserve original-volume shares and BE
+PASS final R comes from active plan
+PASS invalid active target count has no final R
+PASS active-plan volume wrapper uses the same validated plan
+PASS all 1..20 equal-share target counts handle exact step quantities
+
+48 tests passed against production RRPlan.mqh functions.
+Scope: input validation and planned quantities; broker execution and binary file durability are tested separately.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan.test.mjs (40.4951ms)
+ok 1 - saved plan loads R, percentage and BE independently
+ok 2 - unused rows are hidden and visible targets stay visible
+ok 3 - typing and BE edits remain a draft until save
+ok 4 - adding sixth target jumps to second page and retains unfinished text
+ok 5 - pagination preserves independent BE choices and edits on each page
+ok 6 - delete shifts R, percentage and BE as one target
+ok 7 - deleting sole last-page row returns to valid previous page
+ok 8 - last remaining target cannot be deleted
+ok 9 - twentieth target caps additions and remains editable on page four
+ok 10 - reset discards unsaved values and reloads saved plan
+ok 11 - malformed visible input is rejected before guard or apply
+ok 12 - malformed input on another page is still rejected
+ok 13 - pending-order guard blocks saving and TP updates
+ok 14 - plan validation or persistence failure preserves active plan
+ok 15 - successful save captures current controls and refreshes final TP
+ok 16 - RR disabled can save plan without modifying the regular TP
+ok 17 - minimized page rendering never makes target controls visible
+RR plan UI: 17 production-method tests passed.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan_ui.test.mjs (53.8412ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 382.2324

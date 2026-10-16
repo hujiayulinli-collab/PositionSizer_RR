@@ -6,6 +6,16 @@
 #include "Defines.mqh"
 #include <ChartObjects\ChartObjectsTxtControls.mqh>
 
+// Draft BE flags belong to the RR plan editor, not the generic panel layout.
+// Skipping these controls in the layout stream also keeps old layout files
+// compatible: CAppDialog stores its own metadata after the original controls.
+class CRRPlanCheckBox : public CCheckBox
+{
+public:
+    virtual bool Save(const int file_handle) { return true; }
+    virtual bool Load(const int file_handle) { return true; }
+};
+
 class CPositionSizeCalculator : public CAppDialog
 {
 private:
@@ -14,6 +24,16 @@ private:
     CEdit            m_EdtEntryLevel, m_EdtSL, m_EdtTP, m_EdtStopPrice, m_EdtAccount, m_EdtCommissionSize, m_EdtRiskPIn, m_EdtRiskPRes, m_EdtRiskMIn, m_EdtRiskMRes, m_EdtReward1, m_EdtReward2, m_EdtRR1, m_EdtRR2, m_EdtPosSize, m_EdtPointValue, m_EdtATRPeriod, m_EdtATRMultiplierSL, m_EdtATRMultiplierTP, m_EdtCurRiskM, m_EdtCurRiskP, m_EdtPotRiskM, m_EdtPotRiskP, m_EdtCurProfitM, m_EdtCurProfitP, m_EdtPotProfitM, m_EdtPotProfitP, m_EdtCurL, m_EdtPotL, m_EdtCurrentRRR, m_EdtPotentialRRR, m_EdtPosMargin, m_EdtUsedMargin, m_EdtFreeMargin, m_EdtCustomLeverage, m_EdtMaxPositionSizeByMargin, m_EdtSwapsType, m_EdtSwapsTripleDay, m_EdtSwapsNominalLong, m_EdtSwapsNominalShort, m_EdtSwapsDailyLongLot, m_EdtSwapsDailyShortLot, m_EdtSwapsDailyLongPS, m_EdtSwapsDailyShortPS, m_EdtSwapsYearlyLongLot, m_EdtSwapsYearlyShortLot, m_EdtSwapsYearlyLongPS, m_EdtSwapsYearlyShortPS, m_EdtMagicNumber, m_EdtExpiry, m_EdtCommentary, m_EdtMaxSlippage, m_EdtMaxSpread, m_EdtMaxEntrySLDistance, m_EdtMinEntrySLDistance, m_EdtTrailingStopPoints, m_EdtBreakEvenPoints, m_EdtMaxNumberOfTradesTotal, m_EdtMaxNumberOfTradesPerSymbol, m_EdtMaxPositionSizeTotal, m_EdtMaxPositionSizePerSymbol, m_EdtMaxRiskTotal, m_EdtMaxRiskPerSymbol, m_EdtMaxRiskPercentage, m_EdtTPMultiplier, m_EdtMarginUtilizedCurrent, m_EdtMarginUtilizedPosition, m_EdtMarginUtilizedFuture, m_EdtMUBStartingBalance, m_EdtMaxMarginPercTotal, m_EdtMaxMarginPercPerSymbol, m_EdtMaxMarginPerc;
     CLabel           m_LblEntryLevel, m_LblEntryWarning, m_LblSL, m_LblSLWarning, m_LblStopPrice, m_LblStopPriceWarning, m_LblOrderType, m_LblCommissionSize, m_LblAdditionalFundsAsterisk, m_LblInput, m_LblResult, m_LblRisk, m_LblRiskM, m_LblReward, m_LblRR, m_LblPosSize, m_LblPointValue, m_LblATRPeriod, m_LblATRMultiplierSL, m_LblATRMultiplierTP, m_LblATRValue, m_LblATRTimeframe, m_LblCurrentRiskMoney, m_LblCurrentRiskPerc, m_LblCurrentProfitMoney, m_LblCurrentProfitPerc, m_LblPotentialRiskMoney, m_LblPotentialRiskPerc, m_LblPotentialProfitMoney, m_LblPotentialProfitPerc, m_LblCurrentLots, m_LblCurrentRRR, m_LblPotentialLots, m_LblPotentialRRR, m_LblCurrentPortfolio, m_LblPotentialPortfolio, m_LblPosMargin, m_LblUsedMargin, m_LblFreeMargin, m_LblCustomLeverage, m_LblAccLeverage, m_LblSymbolLeverage, m_LblMaxPositionSizeByMargin, m_LblSwapsType, m_LblSwapsTripleDay, m_LblSwapsLong, m_LblSwapsShort, m_LblSwapsNominal, m_LblSwapsDaily, m_LblSwapsYearly, m_LblSwapsPerLotDaily, m_LblSwapsPerPSDaily, m_LblSwapsPerLotYearly, m_LblSwapsPerPSYearly, m_LblMagicNumber, m_LblExpiry, m_LblMinutes, m_LblCommentary, m_LblTradingPoints, m_LblMaxSlippage, m_LblMaxSpread, m_LblMaxEntrySLDistance, m_LblMinEntrySLDistance, m_LblTradingLots, m_LblURL, m_LblTradingTP, m_LblTrailingStop, m_LblBreakEven, m_LblMaxNumberOfTrades, m_LblMaxNumberOfTradesTotal, m_LblMaxNumberOfTradesPerSymbol, m_LblMaxPositionSize, m_LblMaxPositionSizeTotal, m_LblMaxPositionSizePerSymbol, m_LblMaxRisk, m_LblMaxRiskTotal, m_LblMaxRiskPerSymbol, m_LblMaxRiskPercentage, m_LblIncludeOrders, m_LblIncludeSymbols, m_LblIncludeDirections, m_LblMarginUtilizedPerc, m_LblMarginUtilizedPercCurrent, m_LblMarginUtilizedPercPosition, m_LblMarginUtilizedPercFuture, m_LblMarginUtilizedBase, m_LblMarginUtilizedBaseCurrency, m_LblMaxMarginPerc, m_LblMaxMarginPercTotal, m_LblMaxMarginPercPerSymbol, m_LblMaxMarginPercFuse;
     CHorizontalRadioGroup m_RgpIncludeOrders, m_RgpIncludeSymbols, m_RgpIncludeDirections, m_RgpMarginUtilizationBase;
+
+    // The editor keeps its own text draft; only Save can replace RRActivePlan.
+    CButton          m_BtnTabRR, m_BtnRRAdd, m_BtnRRSave, m_BtnRRReset, m_BtnRRPrevious, m_BtnRRNext, m_BtnRRDelete[5];
+    CEdit            m_EdtRRMultiple[5], m_EdtRRPercent[5];
+    CRRPlanCheckBox  m_ChkRRBreakEven[5];
+    CLabel           m_LblRRNumber[5], m_LblRRHeadingR, m_LblRRHeadingPercent, m_LblRRHeadingBE, m_LblRRMode, m_LblRRInfo, m_LblRRBEInfo, m_LblRRPage, m_LblRRStatus, m_LblRRStatus2;
+    int              m_rr_page, m_rr_count;
+    bool             m_rr_visible;
+    string           m_rr_multiple[RR_MAX_TARGETS], m_rr_percent[RR_MAX_TARGETS];
+    bool             m_rr_be[RR_MAX_TARGETS];
 
     string           m_FileName;
     double           m_DPIScale;
@@ -30,7 +50,7 @@ private:
     CLabel           AdditionalTPLabels[], AdditionalTPWarnings[];
     CButton          AdditionalTPButtonsIncrease[], AdditionalTPButtonsDecrease[];
     // Store ordered and named panel objects arranged by tabs.
-    CPanelList       *MainTabList, *RiskTabList, *MarginTabList, *SwapsTabList, *TradingTabList, *PersistentList; // PersisntentList can be potentially used for Strategy Tester event tracking in the future.
+    CPanelList       *MainTabList, *RiskTabList, *MarginTabList, *SwapsTabList, *TradingTabList, *RRTabList, *PersistentList; // PersisntentList can be potentially used for Strategy Tester event tracking in the future.
     
     // Some of the panel measurement parameters are used by more than one method:
     int              first_column_start, normal_label_width, normal_edit_width, second_column_start, element_height, third_column_start, narrow_label_width, v_spacing, multi_tp_column_start,
@@ -129,6 +149,20 @@ private:
     virtual void     HideSwaps();
     virtual void     HideTrading();
 
+    bool             CreateRRControls();
+    void             ShowRR();
+    void             HideRR();
+    void             LoadRRDraft();
+    void             CaptureRRPage();
+    void             RenderRRPage();
+    void             SetRRStatus(const string text, const bool error = false);
+    void             OnClickBtnTabRR();
+    void             OnClickBtnRRAdd();
+    void             OnClickBtnRRSave();
+    void             OnClickBtnRRReset();
+    void             OnClickBtnRRPrevious();
+    void             OnClickBtnRRNext();
+    void             OnClickBtnRRDelete(const int row);
     virtual bool     CreateObjects();
     virtual bool     InitObjects();
     virtual bool     DisplayValues(); // Updates values in the panel.
@@ -218,8 +252,31 @@ private:
     void OnClickBtnQuickRisk2();
 };
 
+#include "RRPlanPanel.mqh"
+
 // Event Map
 EVENT_MAP_BEGIN(CPositionSizeCalculator)
+ON_EVENT(ON_CLICK, m_BtnTabRR, OnClickBtnTabRR)
+ON_EVENT(ON_CLICK, m_BtnRRAdd, OnClickBtnRRAdd)
+ON_EVENT(ON_CLICK, m_BtnRRSave, OnClickBtnRRSave)
+ON_EVENT(ON_CLICK, m_BtnRRReset, OnClickBtnRRReset)
+ON_EVENT(ON_CLICK, m_BtnRRPrevious, OnClickBtnRRPrevious)
+ON_EVENT(ON_CLICK, m_BtnRRNext, OnClickBtnRRNext)
+for (int rr_row = 0; rr_row < 5; rr_row++)
+{
+    if ((id == ON_CLICK + CHARTEVENT_CUSTOM) && (lparam == m_BtnRRDelete[rr_row].Id()))
+    {
+        OnClickBtnRRDelete(rr_row);
+        return true;
+    }
+    if (((id == ON_END_EDIT + CHARTEVENT_CUSTOM) && ((lparam == m_EdtRRMultiple[rr_row].Id()) || (lparam == m_EdtRRPercent[rr_row].Id()))) ||
+        ((id == ON_CHANGE + CHARTEVENT_CUSTOM) && (lparam == m_ChkRRBreakEven[rr_row].Id())))
+    {
+        CaptureRRPage();
+        SetRRStatus("有未保存的修改，点击“保存方案”生效。");
+        return true;
+    }
+}
 ON_EVENT(ON_END_EDIT, m_EdtEntryLevel, OnEndEditEdtEntryLevel)
 ON_EVENT(ON_CLICK, m_BtnEntryIncrease, OnClickBtnEntryIncrease)
 ON_EVENT(ON_CLICK, m_BtnEntryDecrease, OnClickBtnEntryDecrease)
@@ -331,12 +388,14 @@ CPositionSizeCalculator::~CPositionSizeCalculator(void)
     if (CheckPointer(MarginTabList) == POINTER_DYNAMIC) delete MarginTabList;
     if (CheckPointer(SwapsTabList) == POINTER_DYNAMIC) delete SwapsTabList;
     if (CheckPointer(TradingTabList) == POINTER_DYNAMIC) delete TradingTabList;
+    if (CheckPointer(RRTabList) == POINTER_DYNAMIC) delete RRTabList;
     if (CheckPointer(PersistentList) == POINTER_DYNAMIC) delete PersistentList;
     MainTabList = NULL;
     RiskTabList = NULL;
     MarginTabList = NULL;
     SwapsTabList = NULL;
     TradingTabList = NULL;
+    RRTabList = NULL;
     PersistentList = NULL;
 }
 
@@ -353,11 +412,15 @@ void CPositionSizeCalculator::InitVariables()
 {
     m_controls_ready = false;
     NoPanelMaximization = false;
+    m_rr_page = 0;
+    m_rr_count = 0;
+    m_rr_visible = false;
     MainTabList = NULL;
     RiskTabList = NULL;
     MarginTabList = NULL;
     SwapsTabList = NULL;
     TradingTabList = NULL;
+    RRTabList = NULL;
     PersistentList = NULL;
     LinesSelectedStatus = 0;
     remember_left = -1;
@@ -649,16 +712,26 @@ bool CPositionSizeCalculator::CreateObjects()
 // Tabs
 
     PersistentList = new CPanelList;
-    if (!ButtonCreate(PersistentList, m_BtnTabMain, tab_button_start, y, tab_button_start + tab_button_width, y + element_height, "m_BtnTabMain", TRANSLATION_TAB_BUTTON_MAIN))                                                                                                                    return false;
+    int rr_tab_width = (int)MathRound(42 * m_DPIScale);
+    int rr_tab_gap = (int)MathRound(3 * m_DPIScale);
+    int rr_tab_x = first_column_start;
+    if (!ButtonCreate(PersistentList, m_BtnTabMain, rr_tab_x, y, rr_tab_x + rr_tab_width, y + element_height, "m_BtnTabMain", TRANSLATION_TAB_BUTTON_MAIN)) return false;
+    rr_tab_x += rr_tab_width + rr_tab_gap;
     MainTabList = new CPanelList;
-    if (!ButtonCreate(PersistentList, m_BtnTabRisk, tab_button_start + tab_button_width + tab_button_spacing, y, tab_button_start + tab_button_width * 2 + tab_button_spacing, y + element_height, "m_BtnTabRisk", TRANSLATION_TAB_BUTTON_RISK))                                                                                                                   return false;
+    if (!ButtonCreate(PersistentList, m_BtnTabRisk, rr_tab_x, y, rr_tab_x + rr_tab_width, y + element_height, "m_BtnTabRisk", TRANSLATION_TAB_BUTTON_RISK)) return false;
+    rr_tab_x += rr_tab_width + rr_tab_gap;
     RiskTabList = new CPanelList;
-    if (!ButtonCreate(PersistentList, m_BtnTabMargin, tab_button_start + tab_button_width * 2 + tab_button_spacing * 2, y, tab_button_start + tab_button_width * 3 + tab_button_spacing * 2, y + element_height, "m_BtnTabMargin", TRANSLATION_TAB_BUTTON_MARGIN))                                                                                                             return false;
+    if (!ButtonCreate(PersistentList, m_BtnTabMargin, rr_tab_x, y, rr_tab_x + rr_tab_width, y + element_height, "m_BtnTabMargin", TRANSLATION_TAB_BUTTON_MARGIN)) return false;
+    rr_tab_x += rr_tab_width + rr_tab_gap;
     MarginTabList = new CPanelList;
-    if (!ButtonCreate(PersistentList, m_BtnTabSwaps, tab_button_start + tab_button_width * 3 + tab_button_spacing * 3, y, tab_button_start + tab_button_width * 4 + tab_button_spacing * 3, y + element_height, "m_BtnTabSwaps", TRANSLATION_TAB_BUTTON_SWAPS))                                                                                                                return false;
+    if (!ButtonCreate(PersistentList, m_BtnTabSwaps, rr_tab_x, y, rr_tab_x + rr_tab_width, y + element_height, "m_BtnTabSwaps", TRANSLATION_TAB_BUTTON_SWAPS)) return false;
+    rr_tab_x += rr_tab_width + rr_tab_gap;
     SwapsTabList = new CPanelList;
-    if (!ButtonCreate(PersistentList, m_BtnTabTrading, tab_button_start + tab_button_width * 4 + tab_button_spacing * 4, y, tab_button_start + tab_button_width * 5 + tab_button_spacing * 4, y + element_height, "m_BtnTabTrading", TRANSLATION_TAB_BUTTON_TRADING))                                                                                                             return false;
+    if (!ButtonCreate(PersistentList, m_BtnTabTrading, rr_tab_x, y, rr_tab_x + rr_tab_width, y + element_height, "m_BtnTabTrading", TRANSLATION_TAB_BUTTON_TRADING)) return false;
+    rr_tab_x += rr_tab_width + rr_tab_gap;
     TradingTabList = new CPanelList;
+    if (!ButtonCreate(PersistentList, m_BtnTabRR, rr_tab_x, y, rr_tab_x + (int)MathRound(82 * m_DPIScale), y + element_height, "m_BtnTabRR", "分仓止盈")) return false;
+    RRTabList = new CPanelList;
 
 // Main
 
@@ -1327,6 +1400,8 @@ bool CPositionSizeCalculator::CreateObjects()
         m_OutsideTradeButton.Hide(); // Will be unhidden after it's moved to above the Entry line.
     }
 
+    if (!CreateRRControls()) return false;
+
     // All tab lists and controls now exist. InitObjects() may itself cause
     // layout callbacks, so enable those callbacks before initializing values.
     m_controls_ready = true;
@@ -1449,12 +1524,14 @@ bool CPositionSizeCalculator::InitObjects()
     HideMain();
     HideSwaps();
     HideTrading();
+    HideRR();
 
     if (sets.SelectedTab == MainTab) ShowMain();
     else if (sets.SelectedTab == RiskTab) ShowRisk();
     else if (sets.SelectedTab == MarginTab) ShowMargin();
     else if (sets.SelectedTab == SwapsTab) ShowSwaps();
     else if (sets.SelectedTab == TradingTab) ShowTrading();
+    else if (sets.SelectedTab == RRTargetsTab) ShowRR();
 
     InitControlsValues(); // Init values inside controls.
 
@@ -1792,6 +1869,9 @@ void CPositionSizeCalculator::MoveAndResize()
         break;
     case TradingTab:
         ref_point = m_ChkAskForConfirmation.Top();
+        break;
+    case RRTargetsTab:
+        ref_point = m_LblRRStatus2.Top();
         break;
     default:
         ref_point = m_LblRiskM.Top();
@@ -2148,6 +2228,7 @@ void CPositionSizeCalculator::Maximize()
     HideMain();
     HideSwaps();
     HideTrading();
+    HideRR();
 
     if (!m_minimized)
     {
@@ -2156,6 +2237,7 @@ void CPositionSizeCalculator::Maximize()
         else if (sets.SelectedTab == MarginTab) ShowMargin();
         else if (sets.SelectedTab == SwapsTab) ShowSwaps();
         else if (sets.SelectedTab == TradingTab) ShowTrading();
+        else if (sets.SelectedTab == RRTargetsTab) ShowRR();
     }
 
     MoveAndResize();
@@ -2408,7 +2490,7 @@ void CPositionSizeCalculator::RefreshValues()
     {
         m_EdtTP.ReadOnly(true);
         m_EdtTPMultiplier.ReadOnly(true);
-        m_EdtTPMultiplier.Text(DoubleToString(RR_FinalTarget, CountDecimalPlaces(RR_FinalTarget)));
+        m_EdtTPMultiplier.Text(DoubleToString(RRPlanFinalR(), CountDecimalPlaces(RRPlanFinalR())));
         ObjectSetInteger(ChartID(), ObjectPrefix + "TakeProfitLine", OBJPROP_SELECTED, false);
         ObjectSetInteger(ChartID(), ObjectPrefix + "TakeProfitLine", OBJPROP_SELECTABLE, false);
     }
@@ -2658,7 +2740,7 @@ void CPositionSizeCalculator::ProcessTPChange(const bool tp_button_click)
     {
         // The RR manager uses the original price risk, excluding costs.
         // Keep the panel and the server TP on the same final target.
-        tp_distance = (tEntryLevel - tStopLossLevel) * RR_FinalTarget;
+        tp_distance = (tEntryLevel - tStopLossLevel) * RRPlanFinalR();
     }
     else if ((UseCommissionToSetTPDistance) && (sets.CommissionPerLot != 0))
     {
@@ -2679,7 +2761,7 @@ void CPositionSizeCalculator::ProcessTPChange(const bool tp_button_click)
     sets.TakeProfitLevel = NormalizeDouble(tEntryLevel + tp_distance, _Digits);
     if (RR_Enable)
         sets.TakeProfitLevel = RRTargetPrice(tEntryLevel >= tStopLossLevel ? 1 : -1,
-            tEntryLevel, MathAbs(tEntryLevel - tStopLossLevel), RR_FinalTarget, TickSize, _Digits);
+            tEntryLevel, MathAbs(tEntryLevel - tStopLossLevel), RRPlanFinalR(), TickSize, _Digits);
 
     if (tTakeProfitLevel != sets.TakeProfitLevel)
     {
@@ -2690,7 +2772,7 @@ void CPositionSizeCalculator::ProcessTPChange(const bool tp_button_click)
         tTakeProfitLevel = sets.TakeProfitLevel;
         if (sets.ATRMultiplierSL > 0)
         {
-            sets.ATRMultiplierTP = NormalizeDouble(sets.ATRMultiplierSL * (RR_Enable ? RR_FinalTarget : sets.TPMultiplier), 2);
+            sets.ATRMultiplierTP = NormalizeDouble(sets.ATRMultiplierSL * (RR_Enable ? RRPlanFinalR() : sets.TPMultiplier), 2);
             m_EdtATRMultiplierTP.Text(DoubleToString(sets.ATRMultiplierTP, 2));
         }
         if (!sets.TPDistanceInPoints) m_EdtTP.Text(DoubleToString(tTakeProfitLevel, _Digits));
@@ -2827,6 +2909,7 @@ void CPositionSizeCalculator::OnClickBtnTabMain()
         HideMargin();
         HideSwaps();
         HideTrading();
+    HideRR();
 
         MoveAndResize();
         RefreshValues();
@@ -2843,6 +2926,7 @@ void CPositionSizeCalculator::OnClickBtnTabRisk()
         HideMargin();
         HideSwaps();
         HideTrading();
+    HideRR();
 
         MoveAndResize();
         RefreshValues();
@@ -2859,6 +2943,7 @@ void CPositionSizeCalculator::OnClickBtnTabMargin()
         ShowMargin();
         HideSwaps();
         HideTrading();
+    HideRR();
 
         MoveAndResize();
         RefreshValues();
@@ -2875,6 +2960,7 @@ void CPositionSizeCalculator::OnClickBtnTabSwaps()
         HideMargin();
         ShowSwaps();
         HideTrading();
+    HideRR();
 
         MoveAndResize();
         RefreshValues();
@@ -2891,6 +2977,7 @@ void CPositionSizeCalculator::OnClickBtnTabTrading()
         HideMargin();
         HideSwaps();
         ShowTrading();
+        HideRR();
 
         MoveAndResize();
     }

@@ -5,17 +5,19 @@
 
 input group "分仓止盈 / RR exit manager"
 input(name="启用分仓止盈") bool RR_Enable = true;
-input(name="第一目标 R 倍数") double RR_FirstTarget = 2.0;
-input(name="第一目标平掉初始仓位百分比") double RR_ClosePercent = 50.0;
-input(name="最终全平 R 倍数") double RR_FinalTarget = 5.0;
-input(name="第一目标减仓完成后设保本") bool RR_MoveToBE = true;
+input(name="首次方案：第一目标 R") double RR_FirstTarget = 2.0;
+input(name="首次方案：第一目标平仓百分比") double RR_ClosePercent = 50.0;
+input(name="首次方案：最终 R") double RR_FinalTarget = 5.0;
+input(name="首次方案：第一目标触发 BE") bool RR_MoveToBE = true;
 input(name="保本价额外盈利点数（非点差）") int RR_BEOffsetPoints = 0;
 input(name="平仓允许偏差（points）") uint RR_DeviationPoints = 20;
 
 // Append-only per-position journal, held with an exclusive file handle during
 // management. Intent is flushed BEFORE sending any close. A torn journal or an
 // ambiguous broker reply fails closed rather than guessing and closing twice.
-struct RRState
+// Exact version-1 disk layout: never append to or reorder this structure.
+// Existing positions continue using their original plan and execution semantics.
+struct RRLegacyState
 {
     uint version;
     ulong identifier;
@@ -42,6 +44,94 @@ struct RRState
     uint checksum;
 };
 
+struct RRState
+{
+    uint version;
+    ulong identifier;
+    long magic;
+    ulong opening_order;
+    int direction;
+    double entry;
+    double risk;
+    double initial_volume;
+    double first_r;
+    double final_r;
+    double percent;
+    int move_be;
+    int offset_points;
+    int stage; // v1: legacy 0..3; v2: number of triggered targets.
+    int be_done;
+    int blocked;
+    int sequence;
+    int pending;
+    ulong pending_order;
+    double before_volume;
+    long last_request;
+    long last_stop_request;
+    uint checksum;
+    int target_count;
+    double target_r[RR_MAX_TARGETS];
+    double target_percent[RR_MAX_TARGETS];
+    int target_be[RR_MAX_TARGETS];
+    int be_requested;
+};
+
+void RRFromLegacy(const RRLegacyState &legacy, RRState &s)
+{
+    ZeroMemory(s);
+    s.version = legacy.version;
+    s.identifier = legacy.identifier;
+    s.magic = legacy.magic;
+    s.opening_order = legacy.opening_order;
+    s.direction = legacy.direction;
+    s.entry = legacy.entry;
+    s.risk = legacy.risk;
+    s.initial_volume = legacy.initial_volume;
+    s.first_r = legacy.first_r;
+    s.final_r = legacy.final_r;
+    s.percent = legacy.percent;
+    s.move_be = legacy.move_be;
+    s.offset_points = legacy.offset_points;
+    s.stage = legacy.stage;
+    s.be_done = legacy.be_done;
+    s.blocked = legacy.blocked;
+    s.sequence = legacy.sequence;
+    s.pending = legacy.pending;
+    s.pending_order = legacy.pending_order;
+    s.before_volume = legacy.before_volume;
+    s.last_request = legacy.last_request;
+    s.last_stop_request = legacy.last_stop_request;
+    s.checksum = legacy.checksum;
+}
+
+void RRToLegacy(const RRState &s, RRLegacyState &legacy)
+{
+    ZeroMemory(legacy);
+    legacy.version = s.version;
+    legacy.identifier = s.identifier;
+    legacy.magic = s.magic;
+    legacy.opening_order = s.opening_order;
+    legacy.direction = s.direction;
+    legacy.entry = s.entry;
+    legacy.risk = s.risk;
+    legacy.initial_volume = s.initial_volume;
+    legacy.first_r = s.first_r;
+    legacy.final_r = s.final_r;
+    legacy.percent = s.percent;
+    legacy.move_be = s.move_be;
+    legacy.offset_points = s.offset_points;
+    legacy.stage = s.stage;
+    legacy.be_done = s.be_done;
+    legacy.blocked = s.blocked;
+    legacy.sequence = s.sequence;
+    legacy.pending = s.pending;
+    legacy.pending_order = s.pending_order;
+    legacy.before_volume = s.before_volume;
+    legacy.last_request = s.last_request;
+    legacy.last_stop_request = s.last_stop_request;
+    legacy.checksum = s.checksum;
+}
+
 ulong RRExistingIDs[];
 long RRAccount = 0;
 string RRServer = "";
@@ -63,6 +153,12 @@ uint RRChecksum(const RRState &s)
     value += "|" + DoubleToString(s.first_r, 8) + "|" + DoubleToString(s.final_r, 8) + "|" + DoubleToString(s.percent, 8);
     value += StringFormat("|%d|%d|%d|%d|%d|%d|%d|%I64u|", s.move_be, s.offset_points, s.stage, s.be_done, s.blocked, s.sequence, s.pending, s.pending_order);
     value += DoubleToString(s.before_volume, 8) + "|" + IntegerToString(s.last_request) + "|" + IntegerToString(s.last_stop_request);
+    if (s.version == 2)
+    {
+        value += "|" + IntegerToString(s.target_count) + "|" + IntegerToString(s.be_requested);
+        for (int i = 0; i < RR_MAX_TARGETS; i++)
+            value += "|" + DoubleToString(s.target_r[i], 16) + "|" + DoubleToString(s.target_percent[i], 16) + "|" + IntegerToString(s.target_be[i]);
+    }
     return RRHash(value);
 }
 
@@ -94,14 +190,19 @@ void RRSnapshotExisting()
 bool RRValidateInputs()
 {
     RRSnapshotExisting();
-    if (!RR_Enable) return true;
-    if (!MathIsValidNumber(RR_FirstTarget) || !MathIsValidNumber(RR_FinalTarget) || !MathIsValidNumber(RR_ClosePercent)
-        || RR_FirstTarget <= 0 || RR_FinalTarget <= RR_FirstTarget || RR_ClosePercent <= 0 || RR_ClosePercent >= 100 || RR_BEOffsetPoints < 0)
+    string error;
+    if (!RRPlanInitialize(RR_FirstTarget, RR_ClosePercent, RR_FinalTarget, RR_MoveToBE, error))
     {
-        Print("[PS RR] 参数无效：0 < 第一目标 < 最终目标；0 < 平仓百分比 < 100；保本偏移 >= 0。");
+        Print("[PS RR] 止盈方案无效：", error);
         return false;
     }
-    PrintFormat("[PS RR] 已启用：%.2fR 平 %.2f%%，%.2fR 全平。仅接管新仓及已有 RR 记录的仓位。", RR_FirstTarget, RR_ClosePercent, RR_FinalTarget);
+    if (RR_BEOffsetPoints < 0)
+    {
+        Print("[PS RR] 保本偏移点数不能小于 0。");
+        return false;
+    }
+    if (RR_Enable)
+        PrintFormat("[PS RR] 已启用 %d 个止盈目标，最终 %.2fR 全平。每个新仓冻结开仓时的方案。", RRActivePlan.count, RRPlanFinalR());
     return true;
 }
 
@@ -127,9 +228,23 @@ bool RRSave(const int handle, RRState &s)
     s.checksum = RRChecksum(s);
     ResetLastError();
     if (!FileSeek(handle, 0, SEEK_END)) return false;
-    uint written = FileWriteStruct(handle, s);
+    uint written;
+    uint expected;
+    if (s.version == 1)
+    {
+        RRLegacyState legacy;
+        RRToLegacy(s, legacy);
+        written = FileWriteStruct(handle, legacy);
+        expected = sizeof(RRLegacyState);
+    }
+    else if (s.version == 2)
+    {
+        written = FileWriteStruct(handle, s);
+        expected = sizeof(RRState);
+    }
+    else return false;
     FileFlush(handle);
-    if (written != sizeof(RRState) || GetLastError() != 0)
+    if (written != expected || GetLastError() != 0)
     {
         RRNotice("状态保存失败，停止发送交易请求。请检查 MQL5/Files 的写入权限及磁盘空间。");
         return false;
@@ -140,12 +255,41 @@ bool RRSave(const int handle, RRState &s)
 bool RRLoad(const int handle, RRState &s, const ulong id)
 {
     ulong size = FileSize(handle);
-    if (size < sizeof(RRState) || size % sizeof(RRState) != 0) return false;
-    if (!FileSeek(handle, (long)(size - sizeof(RRState)), SEEK_SET)) return false;
-    if (FileReadStruct(handle, s) != sizeof(RRState)) return false;
-    return s.version == 1 && s.identifier == id && s.checksum == RRChecksum(s)
-        && MathIsValidNumber(s.risk) && s.risk > 0 && s.initial_volume > 0
-        && (s.direction == 1 || s.direction == -1) && s.stage >= 0 && s.stage <= 3;
+    if (size < sizeof(uint) || !FileSeek(handle, 0, SEEK_SET)) return false;
+    uint version = (uint)FileReadInteger(handle, INT_VALUE);
+    if (version == 1)
+    {
+        if (size < sizeof(RRLegacyState) || size % sizeof(RRLegacyState) != 0) return false;
+        if (!FileSeek(handle, (long)(size - sizeof(RRLegacyState)), SEEK_SET)) return false;
+        RRLegacyState legacy;
+        if (FileReadStruct(handle, legacy) != sizeof(RRLegacyState)) return false;
+        RRFromLegacy(legacy, s);
+    }
+    else if (version == 2)
+    {
+        if (size < sizeof(RRState) || size % sizeof(RRState) != 0) return false;
+        if (!FileSeek(handle, (long)(size - sizeof(RRState)), SEEK_SET)) return false;
+        if (FileReadStruct(handle, s) != sizeof(RRState)) return false;
+    }
+    else return false;
+    if (s.version != version || s.identifier != id || s.checksum != RRChecksum(s)
+        || !MathIsValidNumber(s.risk) || s.risk <= 0 || !MathIsValidNumber(s.initial_volume) || s.initial_volume <= 0
+        || !MathIsValidNumber(s.entry) || s.entry <= 0 || (s.direction != 1 && s.direction != -1)
+        || s.stage < 0 || (s.pending != 0 && s.pending != 1) || s.sequence < 0) return false;
+    if (version == 1) return s.stage <= 3;
+    if (s.target_count < 1 || s.target_count > RR_MAX_TARGETS || s.stage > s.target_count
+        || (s.be_requested != 0 && s.be_requested != 1)) return false;
+    RRPlan frozen;
+    ZeroMemory(frozen);
+    frozen.count = s.target_count;
+    for (int i = 0; i < s.target_count; i++)
+    {
+        frozen.targets[i].multiple = s.target_r[i];
+        frozen.targets[i].percent = s.target_percent[i];
+        frozen.targets[i].move_be = s.target_be[i];
+    }
+    string error;
+    return RRPlanValidate(frozen, error) && s.final_r == s.target_r[s.target_count - 1];
 }
 
 // History is authoritative for identifying additions/reversals, even if another
@@ -194,7 +338,7 @@ bool RRCapture(const ulong ticket, RRState &s)
     if (original_sl <= 0) original_sl = PositionGetDouble(POSITION_SL);
     if (original_sl <= 0 || direction * (entry - original_sl) <= 0) return false;
     ZeroMemory(s);
-    s.version = 1;
+    s.version = 2;
     s.identifier = id;
     s.magic = PositionGetInteger(POSITION_MAGIC);
     s.opening_order = opening_order;
@@ -202,10 +346,17 @@ bool RRCapture(const ulong ticket, RRState &s)
     s.entry = entry;
     s.risk = direction * (entry - original_sl);
     s.initial_volume = in_volume;
-    s.first_r = RR_FirstTarget;
-    s.final_r = RR_FinalTarget;
-    s.percent = RR_ClosePercent;
-    s.move_be = (int)RR_MoveToBE;
+    s.target_count = RRActivePlan.count;
+    for (int i = 0; i < s.target_count; i++)
+    {
+        s.target_r[i] = RRActivePlan.targets[i].multiple;
+        s.target_percent[i] = RRActivePlan.targets[i].percent;
+        s.target_be[i] = RRActivePlan.targets[i].move_be;
+    }
+    s.first_r = s.target_r[0];
+    s.final_r = s.target_r[s.target_count - 1];
+    s.percent = s.target_percent[0];
+    s.move_be = s.target_be[0];
     s.offset_points = RR_BEOffsetPoints;
     s.blocked = (int)(mixed || MathAbs(in_volume - volume) > step * 0.1);
     PrintFormat("[PS RR] 仓位 %I64u：初始价 %s，1R=%s，初始手数 %.8f，状态=%s", id,
@@ -361,7 +512,7 @@ void RRUpdateStops(const int handle, RRState &s, const ulong ticket, const strin
     double distance = (double)MathMax(SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL), SymbolInfoInteger(symbol, SYMBOL_TRADE_FREEZE_LEVEL)) * point + tick_size;
     if (MathAbs(old_tp - desired_tp) > tick_size * 0.1 && s.direction * (desired_tp - current_price) >= distance)
         tp = desired_tp;
-    if (s.stage >= 2 && s.move_be != 0)
+    if ((s.version == 1 && s.stage >= 2 && s.move_be != 0) || (s.version == 2 && s.be_requested != 0))
     {
         double be = RRBETarget(s.direction, s.entry, s.offset_points, point, tick_size, digits);
         if (RRSLProtectsBE(s.direction, old_sl, be, tick_size)) s.be_done = 1;
@@ -385,8 +536,75 @@ void RRUpdateStops(const int handle, RRState &s, const ulong ticket, const strin
         RRNotice(StringFormat("仓位 %I64u 更新 SL/TP 尚未成功：%u %s，将继续重试。", s.identifier, result.retcode, result.comment));
 }
 
+// Version 2: latch every crossed target before resolving outstanding closes.
+// A BE trigger is independent of close completion and survives a later pullback.
+void RRProcessMulti(const int handle, RRState &s, const ulong ticket, const string symbol)
+{
+    if (s.blocked != 0 || !PositionSelectByTicket(ticket)) return;
+    double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
+    double minimum = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+    if (step <= 0 || minimum <= 0) return;
+    double volume = PositionGetDouble(POSITION_VOLUME);
+    double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+    int direction = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 1 : -1);
+    double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+    ulong opening_order;
+    double in_volume;
+    bool mixed;
+    if (!RRHistory(s.identifier, opening_order, in_volume, mixed)) return;
+    if (mixed || opening_order != s.opening_order || MathAbs(in_volume - s.initial_volume) > step * 0.1
+        || volume > s.initial_volume + step * 0.1 || direction != s.direction || MathAbs(entry - s.entry) > tick_size * 0.1)
+    {
+        s.blocked = 1;
+        RRSave(handle, s);
+        PrintFormat("[PS RR] 仓位 %I64u 检测到加仓/反转/开仓价变化，已暂停该仓位管理。", s.identifier);
+        return;
+    }
+    MqlTick tick;
+    if (!SymbolInfoTick(symbol, tick) || tick.bid <= 0 || tick.ask <= 0) return;
+    double r = RRPriceR(s.direction, s.entry, s.risk, tick.bid, tick.ask);
+    int previous_stage = s.stage;
+    while (s.stage < s.target_count && r >= s.target_r[s.stage])
+    {
+        if (s.target_be[s.stage] != 0) s.be_requested = 1;
+        s.stage++;
+    }
+    if (s.stage != previous_stage)
+    {
+        if (!RRSave(handle, s)) return;
+        PrintFormat("[PS RR] 仓位 %I64u 已触发目标 %d/%d，BE=%s。", s.identifier, s.stage, s.target_count, s.be_requested != 0 ? "已触发" : "未触发");
+    }
+    // SL/TP changes do not reduce volume, so they are safe while a previous
+    // market close is still awaiting broker confirmation.
+    RRUpdateStops(handle, s, ticket, symbol);
+    if (!PositionSelectByTicket(ticket)) return;
+    volume = PositionGetDouble(POSITION_VOLUME);
+    if (!RRResolvePending(handle, s, volume, step)) return;
+    if (!PositionSelectByTicket(ticket)) return;
+    volume = PositionGetDouble(POSITION_VOLUME);
+    if (s.stage == s.target_count)
+    {
+        RRClose(handle, s, ticket, symbol, volume);
+        return;
+    }
+    double percent = 0;
+    for (int i = 0; i < s.stage; i++) percent += s.target_percent[i];
+    if (percent <= 0) return;
+    double goal = MathFloor(s.initial_volume * percent / 100.0 / step + 1e-8) * step;
+    if (s.initial_volume - volume >= goal - step * 0.1) return;
+    double close_volume = RRPartialLots(s.initial_volume, volume, percent, minimum, step);
+    if (close_volume > 0) RRClose(handle, s, ticket, symbol, close_volume);
+    else RRNotice(StringFormat("仓位 %I64u 累计减仓量暂不符合券商最小手数，等待后续目标；已触发的 BE 仍继续执行。", s.identifier));
+}
+
+
 void RRProcess(const int handle, RRState &s, const ulong ticket, const string symbol)
 {
+    if (s.version == 2)
+    {
+        RRProcessMulti(handle, s, ticket, symbol);
+        return;
+    }
     if (s.blocked != 0 || !PositionSelectByTicket(ticket)) return;
     double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
     double minimum = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
@@ -452,6 +670,51 @@ void RRProcess(const int handle, RRState &s, const ulong ticket, const string sy
     }
     RRUpdateStops(handle, s, ticket, symbol);
 }
+
+// The panel cannot change the plan while a same-strategy order is waiting to
+// fill, or between its first fill and durable capture of the frozen plan.
+bool RRPlanCanEdit(const string symbol, const long magic, string &error)
+{
+    error = "";
+    for (int i = OrdersTotal() - 1; i >= 0; i--)
+    {
+        ulong order = OrderGetTicket(i);
+        if (order > 0 && OrderGetString(ORDER_SYMBOL) == symbol && OrderGetInteger(ORDER_MAGIC) == magic)
+        {
+            error = "该品种存在本 EA 未成交订单，请先等待成交或撤销订单后保存止盈方案。";
+            return false;
+        }
+    }
+    for (int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if (ticket == 0 || PositionGetString(POSITION_SYMBOL) != symbol || PositionGetInteger(POSITION_MAGIC) != magic) continue;
+        ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
+        string filename = RRFileName(id);
+        if (!FileIsExist(filename))
+        {
+            if (RRWasExisting(id)) continue; // Historical positions were never adopted.
+            error = "新仓的止盈方案尚未保存，请稍候再试；若未启用分仓管理，请先处理该订单。";
+            return false;
+        }
+        int handle = FileOpen(filename, FILE_READ | FILE_BIN);
+        if (handle == INVALID_HANDLE)
+        {
+            error = "仓位止盈记录正被其他图表使用或无法读取，请稍候重试。";
+            return false;
+        }
+        RRState s;
+        bool valid = RRLoad(handle, s, id);
+        FileClose(handle);
+        if (!valid || s.magic != magic)
+        {
+            error = "仓位止盈记录尚未完成或已损坏，保存方案前请先检查专家日志。";
+            return false;
+        }
+    }
+    return true;
+}
+
 
 void RRManage(const string symbol, const long magic)
 {

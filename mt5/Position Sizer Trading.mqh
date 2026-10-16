@@ -41,7 +41,7 @@ bool RRBeforeTrade()
     }
     if (sets.TakeProfitsNumber != 1)
     {
-        Alert("RR：请将面板止盈数量设为 1。分仓比例和最终止盈由 RR_FirstTarget、RR_ClosePercent、RR_FinalTarget 控制。");
+        Alert("RR：请将主选项页的止盈数量设为 1。多个目标请在“分仓止盈”页面添加和保存。");
         return false;
     }
     if ((sets.MagicNumber <= 0) || (sets.DoNotApplyStopLoss) || (sets.DoNotApplyTakeProfit))
@@ -58,12 +58,18 @@ bool RRBeforeTrade()
     }
     if ((sets.TrailingStopPoints != 0) || (sets.BreakEvenPoints != 0))
     {
-        Alert("RR：请将原生追踪止损（Trailing Stop）和保本点数（Break-Even）设为 0。RR 模式在分仓完成后设置保本。");
+        Alert("RR：请将交易页的追踪止损和保本点数设为 0。请在“分仓止盈”页面勾选各目标的 BE。");
         return false;
     }
     if (SurpassBrokerMaxPositionSize)
     {
         Alert("RR：请将 SurpassBrokerMaxPositionSize 设为 false。RR 模式不支持因超出券商单笔上限而自动拆成多笔开仓。");
+        return false;
+    }
+    string plan_error;
+    if (!RRPlanValidate(RRActivePlan, plan_error))
+    {
+        Alert("RR：", plan_error);
         return false;
     }
     return RRNettingSlotAvailable();
@@ -75,12 +81,10 @@ bool RRCanSplitVolume(const double volume)
     if (!RR_Enable) return true;
     const double step = SymbolInfoDouble(SymbolForTrading, SYMBOL_VOLUME_STEP);
     const double minimum = SymbolInfoDouble(SymbolForTrading, SYMBOL_VOLUME_MIN);
-    if ((step <= 0) || (minimum <= 0)) return false;
-    const double close_volume = MathFloor(volume * RR_ClosePercent / 100.0 / step + 1e-8) * step;
-    const double remainder = volume - close_volume;
-    if ((close_volume < minimum - step * 1e-8) || (remainder < minimum - step * 1e-8))
+    string error;
+    if (!RRPlanVolumeValid(volume, minimum, step, error))
     {
-        Alert("RR：当前手数按指定比例分仓后，平仓量或剩余量低于券商最小手数。请增加手数或调整 RR_ClosePercent。当前手数=", volume, "，最小手数=", minimum, "，手数步长=", step);
+        Alert("RR：", error, " 当前手数=", volume, "，最小手数=", minimum, "，手数步长=", step);
         return false;
     }
     return true;

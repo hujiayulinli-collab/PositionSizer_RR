@@ -19,11 +19,12 @@ function extract(source, name) {
     }
     assert.equal(depth, 0);
     const parameters = match[1].split(',').map(parameter => {
-        const arg = /^\s*(?:const\s+)?(?:int|double|bool|ulong|string|RRState)\s*&?\s*(\w+)\s*$/.exec(parameter);
+        const arg = /^\s*(?:const\s+)?(?:int|double|bool|ulong|long|string|RRState)\s*&?\s*(\w+)\s*$/.exec(parameter);
         assert.ok(arg, `Unsupported argument: ${parameter}`);
         return arg[1];
     });
     let body = source.slice(start, end - 1)
+        .replace(/\bRRState\s+(\w+)\s*;/g, 'let $1 = {};')
         .replace(/\bMqlTick\s+(\w+)\s*;/g, 'let $1 = {};')
         .replace(/\bMqlTrade(?:Request|Result)\s+(\w+)\s*=\s*\{\}/g, 'let $1 = {}')
         .replace(/\b(?:const\s+)?(?:double|int|bool|ulong|long|string)\s+(?=[A-Za-z_]\w*\s*(?:=|;))/g, 'let ')
@@ -32,6 +33,8 @@ function extract(source, name) {
     // only the fixture's history fields; the production branch logic is intact.
     body = body.replace('RRHistory(s.identifier, opening_order, in_volume, mixed)',
         'RRHistory(s.identifier, value => { opening_order = value.opening_order; in_volume = value.in_volume; mixed = value.mixed; })');
+    body = body.replace('RRHistory(id, opening_order, in_volume, mixed)',
+        'RRHistory(id, value => { opening_order = value.opening_order; in_volume = value.in_volume; mixed = value.mixed; })');
     return `function ${name}(${parameters.join(', ')}) {${body}\n}`;
 }
 
@@ -40,7 +43,8 @@ const constants = ['POSITION_VOLUME', 'POSITION_PRICE_OPEN', 'POSITION_TYPE', 'P
     'ORDER_STATE', 'ORDER_STATE_FILLED', 'ORDER_STATE_CANCELED', 'ORDER_STATE_REJECTED', 'ORDER_STATE_EXPIRED',
     'ORDER_VOLUME_INITIAL', 'ORDER_VOLUME_CURRENT', 'POSITION_SL', 'POSITION_TP', 'SYMBOL_POINT',
     'SYMBOL_DIGITS', 'SYMBOL_TRADE_STOPS_LEVEL', 'SYMBOL_TRADE_FREEZE_LEVEL', 'TRADE_ACTION_SLTP',
-    'TRADE_RETCODE_DONE', 'TRADE_RETCODE_NO_CHANGES'];
+    'TRADE_RETCODE_DONE', 'TRADE_RETCODE_NO_CHANGES', 'POSITION_IDENTIFIER', 'POSITION_MAGIC',
+    'POSITION_SYMBOL', 'ORDER_SYMBOL', 'ORDER_SL', 'FILE_READ', 'FILE_BIN', 'INVALID_HANDLE'];
 let env;
 const context = vm.createContext({
     ...Object.fromEntries(constants.map(name => [name, name])),
@@ -49,7 +53,39 @@ const context = vm.createContext({
     PositionSelectByTicket: () => env.exists,
     PositionGetDouble: name => ({ POSITION_VOLUME: env.volume, POSITION_PRICE_OPEN: env.entry,
         POSITION_SL: env.sl, POSITION_TP: env.tp })[name],
-    PositionGetInteger: () => env.direction === 1 ? 'POSITION_TYPE_BUY' : 'POSITION_TYPE_SELL',
+    PositionGetInteger: property => property === 'POSITION_TYPE'
+        ? (env.direction === 1 ? 'POSITION_TYPE_BUY' : 'POSITION_TYPE_SELL')
+        : property === 'POSITION_MAGIC' ? (env.selectedPosition?.magic ?? 123) : (env.selectedPosition?.id ?? 42),
+    PositionGetString: () => env.selectedPosition?.symbol ?? 'TEST',
+    PositionsTotal: () => env.positions.length,
+    PositionGetTicket: index => {
+        env.selectedPosition = env.positions[index];
+        return env.selectedPosition?.ticket ?? 0;
+    },
+    OrdersTotal: () => env.orders.filter(order => order.active).length,
+    OrderGetTicket: index => {
+        env.selectedOrder = env.orders.filter(order => order.active)[index];
+        return env.selectedOrder?.ticket ?? 0;
+    },
+    OrderGetString: () => env.selectedOrder?.symbol ?? 'TEST',
+    OrderGetInteger: () => env.selectedOrder?.magic ?? 123,
+    RRWasExisting: id => env.existingIDs.includes(id),
+    RRFileName: id => String(id),
+    FileIsExist: name => Object.hasOwn(env.journals, name),
+    FileOpen: name => env.lockedJournal ? 'INVALID_HANDLE' : name,
+    FileClose: handle => env.closedFiles.push(handle),
+    RRLoad: (handle, output) => {
+        Object.assign(output, env.journals[handle]?.state);
+        return env.journals[handle]?.valid ?? false;
+    },
+    DoubleToString: (value, digits) => value.toFixed(digits),
+    ZeroMemory: value => {
+        for (const key of Object.keys(value)) delete value[key];
+        Object.assign(value, { stage: 0, pending: 0, sequence: 0, be_requested: 0, be_done: 0,
+            target_r: Array(20).fill(0), target_percent: Array(20).fill(0), target_be: Array(20).fill(0) });
+    },
+    RRActivePlan: null,
+    RR_BEOffsetPoints: 0,
     SymbolInfoDouble: (_symbol, name) => ({ SYMBOL_VOLUME_STEP: env.step, SYMBOL_VOLUME_MIN: env.minimum,
         SYMBOL_TRADE_TICK_SIZE: env.tickSize, SYMBOL_POINT: env.point })[name],
     SymbolInfoInteger: (_symbol, name) => ({ SYMBOL_DIGITS: env.digits, SYMBOL_TRADE_STOPS_LEVEL: env.stopsLevel,
@@ -85,6 +121,7 @@ const context = vm.createContext({
     },
     HistoryOrderGetDouble: (ticket, property) => {
         const order = env.orders.find(order => order.ticket === ticket);
+        if (property === 'ORDER_SL') return order?.sl ?? 0;
         return property === 'ORDER_VOLUME_INITIAL' ? order?.initial : order?.remaining;
     },
     OrderSelect: ticket => env.orders.some(order => order.ticket === ticket && order.active),
@@ -99,12 +136,13 @@ const context = vm.createContext({
 vm.runInContext([
     extract(core, 'RRPriceR'), extract(core, 'RRPartialLots'),
     extract(core, 'RRTargetPrice'), extract(core, 'RRBETarget'), extract(core, 'RRSLProtectsBE'),
-    extract(manager, 'RRResolvePending'), extract(manager, 'RRProcess'),
+    extract(manager, 'RRResolvePending'), extract(manager, 'RRProcessMulti'), extract(manager, 'RRProcess'),
+    extract(manager, 'RRPlanCanEdit'), extract(manager, 'RRCapture'),
     extract(manager, 'RRUpdateStops').replace('function RRUpdateStops(', 'function RRUpdateStopsActual('),
 ].join('\n'), context);
 
 function state(overrides = {}) {
-    return { identifier: 42, magic: 123, opening_order: 100, direction: 1, entry: 100, risk: 10,
+    return { version: 1, identifier: 42, magic: 123, opening_order: 100, direction: 1, entry: 100, risk: 10,
         initial_volume: 1, first_r: 2, final_r: 5, percent: 50, move_be: 1, offset_points: 0,
         stage: 0, be_done: 0, blocked: 0, pending: 0, pending_order: 0, before_volume: 0,
         last_request: 0, last_stop_request: 0, sequence: 1, ...overrides };
@@ -115,7 +153,8 @@ function resetEnvironment(overrides = {}) {
         inVolume: 1, mixed: false, saveFails: false, now: 100, orders: [], saved: [],
         closes: [], stops: [], notices: [], saveAttempts: 0, sl: 90, tp: 140, point: 0.01, digits: 2,
         stopsLevel: 0, freezeLevel: 0, canTrade: true, sent: [], sendSuccess: true,
-        retcode: 'TRADE_RETCODE_DONE', ...overrides };
+        retcode: 'TRADE_RETCODE_DONE', positions: [], existingIDs: [], journals: {}, closedFiles: [],
+        lockedJournal: false, ...overrides };
 }
 function run(s, overrides = {}) {
     resetEnvironment(overrides);
@@ -298,5 +337,238 @@ check('failed BE retry is throttled and never submits a close', () => {
     assert.equal(result.sent.length, 2); assert.equal(result.closes.length, 0);
 });
 
-process.stdout.write(`\n${passed} manager tests passed against production RRProcess/RRResolvePending/RRUpdateStops.\n`);
+function multiState(overrides = {}) {
+    return state({ version: 2, target_count: 4, target_r: [1, 2, 3, 5],
+        target_percent: [0, 25, 25, 50], target_be: [1, 0, 1, 0],
+        stage: 0, be_requested: 0, ...overrides });
+}
+
+check('multi zero-percent BE target is latched without reducing volume', () => {
+    const s = multiState(); const result = run(s, { bid: 110, ask: 110.2 });
+    assert.equal(s.stage, 1); assert.equal(s.be_requested, 1);
+    assert.equal(result.saved[0].be_requested, 1); assert.equal(result.closes.length, 0);
+    assert.equal(result.stops.length, 1);
+});
+check('multi target percent is measured against initial volume', () => {
+    const s = multiState(); const result = run(s, { bid: 120, ask: 120.2 });
+    assert.equal(s.stage, 2); assert.equal(result.closes[0].volume, 0.25);
+});
+check('multi gap accumulates crossed targets into one reduction', () => {
+    const s = multiState(); const result = run(s, { bid: 135, ask: 135.2 });
+    assert.equal(s.stage, 3); assert.equal(s.be_requested, 1);
+    assert.equal(result.closes.length, 1); assert.equal(result.closes[0].volume, 0.5);
+});
+check('multi gap to final closes entire remainder', () => {
+    const s = multiState(); const result = run(s, { bid: 155, ask: 155.2, volume: 0.75 });
+    assert.equal(s.stage, 4); assert.equal(result.closes[0].volume, 0.75);
+});
+check('multi later target accounts for already completed prior reductions', () => {
+    const s = multiState({ stage: 2, be_requested: 1 });
+    const result = run(s, { bid: 130, ask: 130.2, volume: 0.75 });
+    assert.equal(result.closes[0].volume, 0.25);
+});
+check('multi repeated tick after completed reduction does not close twice', () => {
+    const result = run(multiState({ stage: 3, be_requested: 1 }),
+        { bid: 135, ask: 135.2, volume: 0.5 });
+    assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 1);
+});
+check('multi rounded cumulative targets prevent repeated per-node rounding loss', () => {
+    const s = multiState({ initial_volume: 0.1, target_count: 3,
+        target_r: [1, 2, 5], target_percent: [33, 33, 34], target_be: [0, 0, 0] });
+    const result = run(s, { bid: 125, ask: 125.2, inVolume: 0.1, volume: 0.07 });
+    assert.equal(result.closes[0].volume, 0.03);
+});
+check('multi 34/33/33 of 0.03 lots closes 0.01 at each cumulative target', () => {
+    const s = multiState({ initial_volume: 0.03, target_count: 3,
+        target_r: [1, 2, 5], target_percent: [34, 33, 33], target_be: [0, 0, 0] });
+    assert.equal(run(s, { bid: 110, ask: 110.2, inVolume: 0.03, volume: 0.03 }).closes[0].volume, 0.01);
+    assert.equal(run(s, { bid: 120, ask: 120.2, inVolume: 0.03, volume: 0.02 }).closes[0].volume, 0.01);
+    assert.equal(run(s, { bid: 150, ask: 150.2, inVolume: 0.03, volume: 0.01 }).closes[0].volume, 0.01);
+});
+check('multi manual partial reduction counts toward cumulative goal', () => {
+    const result = run(multiState(), { bid: 135, ask: 135.2, volume: 0.4 });
+    assert.equal(result.closes.length, 0);
+});
+check('multi BE trigger and reduction target survive a retracement', () => {
+    const s = multiState(); const first = run(s, { bid: 130, ask: 130.2 });
+    const loaded = structuredClone(first.saved.at(-1));
+    const result = run(loaded, { bid: 115, ask: 115.2, volume: 0.8 });
+    assert.equal(loaded.stage, 3); assert.equal(loaded.be_requested, 1);
+    assert.equal(result.closes[0].volume, 0.3);
+});
+check('multi pending reduction does not swallow later BE trigger', () => {
+    const s = multiState({ stage: 2, be_requested: 0, target_be: [0, 0, 1, 0],
+        pending: 1, pending_order: 200, before_volume: 1 });
+    const result = run(s, { bid: 130, ask: 130.2, orders: [filledOrder({ active: true })] });
+    assert.equal(s.stage, 3); assert.equal(s.be_requested, 1);
+    assert.equal(result.saved[0].be_requested, 1); assert.equal(result.stops.length, 1);
+    assert.equal(result.closes.length, 0);
+});
+check('multi pending reduction does not swallow final target before retracement', () => {
+    const s = multiState({ stage: 2, pending: 1, pending_order: 200, before_volume: 1 });
+    const first = run(s, { bid: 155, ask: 155.2, orders: [filledOrder({ active: true })] });
+    assert.equal(s.stage, 4); assert.equal(first.closes.length, 0);
+    const result = run(s, { bid: 115, ask: 115.2, volume: 0.5, orders: [filledOrder()] });
+    assert.equal(s.pending, 0); assert.equal(result.closes[0].volume, 0.5);
+});
+check('multi unknown request remains pending while stops can advance', () => {
+    const s = multiState({ pending: 1, before_volume: 1 });
+    const result = run(s, { bid: 130, ask: 130.2, volume: 0.75 });
+    assert.equal(s.pending, 1); assert.equal(s.stage, 3);
+    assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 1);
+});
+check('multi partial IOC fill tops up only cumulative amount still needed', () => {
+    const s = multiState({ stage: 3, pending: 1, pending_order: 200, before_volume: 1 });
+    const result = run(s, { bid: 135, ask: 135.2, volume: 0.8,
+        orders: [filledOrder({ state: 'ORDER_STATE_CANCELED', remaining: 0.3 })] });
+    assert.equal(s.pending, 0); assert.equal(result.closes[0].volume, 0.3);
+});
+check('multi trigger save failure prevents BE request and close', () => {
+    const result = run(multiState(), { bid: 130, ask: 130.2, saveFails: true });
+    assert.equal(result.stops.length, 0); assert.equal(result.closes.length, 0);
+});
+check('multi untradeable partial volume still activates selected BE', () => {
+    const s = multiState({ initial_volume: 0.01 });
+    const result = run(s, { bid: 130, ask: 130.2, volume: 0.01, inVolume: 0.01 });
+    assert.equal(s.be_requested, 1); assert.equal(result.closes.length, 0);
+    assert.equal(result.stops.length, 1);
+});
+check('multi one-target plan closes all volume at its target', () => {
+    const s = multiState({ target_count: 1, target_r: [3], target_percent: [100],
+        target_be: [0], final_r: 3 });
+    const result = run(s, { bid: 130, ask: 130.2 });
+    assert.equal(result.closes[0].volume, 1);
+});
+check('multi twenty targets are processed in one gap safely', () => {
+    const s = multiState({ target_count: 20, target_r: Array.from({ length: 20 }, (_, i) => i + 1),
+        target_percent: Array(20).fill(5), target_be: Array.from({ length: 20 }, (_, i) => i === 17 ? 1 : 0),
+        final_r: 20 });
+    const result = run(s, { bid: 290, ask: 290.2 });
+    assert.equal(s.stage, 19); assert.equal(s.be_requested, 1); assert.equal(result.closes[0].volume, 0.95);
+});
+check('multi sell target uses Ask and does not fire early', () => {
+    const s = multiState({ direction: -1 });
+    const result = run(s, { direction: -1, bid: 79.8, ask: 80.1 });
+    assert.equal(s.stage, 1); assert.equal(result.closes.length, 0);
+});
+check('multi sell targets accumulate when Ask crosses threshold', () => {
+    const s = multiState({ direction: -1 });
+    const result = run(s, { direction: -1, bid: 69.8, ask: 70 });
+    assert.equal(s.stage, 3); assert.equal(result.closes[0].volume, 0.5);
+});
+check('multi opening additions block both closes and BE changes', () => {
+    const s = multiState(); const result = run(s, { bid: 155, ask: 155.2, inVolume: 1.5, mixed: true });
+    assert.equal(s.blocked, 1); assert.equal(result.stops.length, 0); assert.equal(result.closes.length, 0);
+});
+check('multi stage alone does not set BE when no selected target was hit', () => {
+    const result = runStops(multiState({ stage: 3, be_requested: 0 }));
+    assert.equal(result.sent[0].sl, 90);
+});
+check('multi zero-percent first target applies BE before any reduction', () => {
+    const result = runStops(multiState({ stage: 1, be_requested: 1 }));
+    assert.equal(result.sent[0].sl, 100);
+});
+check('multi BE with a pending close still applies stop independently', () => {
+    const result = runStops(multiState({ stage: 3, be_requested: 1, pending: 1 }));
+    assert.equal(result.sent[0].sl, 100); assert.equal(result.closes.length, 0);
+});
+check('multi BE protection never weakens a better existing stop', () => {
+    const result = runStops(multiState({ be_requested: 1 }), { sl: 110 });
+    assert.equal(result.sent[0].sl, 110);
+});
+check('multi BE blocked by freeze distance retries after price recovers', () => {
+    const s = multiState({ stage: 1, be_requested: 1 });
+    const first = runStops(s, { bid: 100.1, ask: 100.3, freezeLevel: 20 });
+    assert.equal(first.sent[0].sl, 90);
+    const result = runStops(s, { bid: 110, ask: 110.2, now: 104 });
+    assert.equal(result.sent[0].sl, 100);
+});
+
+function runCanEdit(overrides = {}) {
+    resetEnvironment(overrides);
+    return context.RRPlanCanEdit('TEST', 123, '');
+}
+const activeOrder = { ticket: 100, symbol: 'TEST', magic: 123, active: true };
+const newPosition = { ticket: 456, symbol: 'TEST', magic: 123, id: 42 };
+check('plan edit is allowed when no same-strategy order or new position exists', () => {
+    assert.equal(runCanEdit(), true);
+});
+check('plan edit is blocked while same-strategy pending order exists', () => {
+    assert.equal(runCanEdit({ orders: [activeOrder] }), false);
+});
+check('plan edit ignores pending orders belonging to another strategy', () => {
+    assert.equal(runCanEdit({ orders: [{ ...activeOrder, magic: 999 }] }), true);
+    assert.equal(runCanEdit({ orders: [{ ...activeOrder, symbol: 'OTHER' }] }), true);
+});
+check('plan edit is blocked between a new fill and its first saved capture', () => {
+    assert.equal(runCanEdit({ positions: [newPosition] }), false);
+});
+check('plan edit ignores historical positions that were never adopted', () => {
+    assert.equal(runCanEdit({ positions: [newPosition], existingIDs: [42] }), true);
+});
+check('plan edit is allowed after new position has a valid frozen journal', () => {
+    assert.equal(runCanEdit({ positions: [newPosition], journals: {
+        42: { valid: true, state: state({ version: 2 }) },
+    } }), true);
+    assert.deepEqual(env.closedFiles, ['42']);
+});
+check('plan edit is blocked for incomplete journal even if position existed at startup', () => {
+    assert.equal(runCanEdit({ positions: [newPosition], existingIDs: [42], journals: {
+        42: { valid: false, state: state() },
+    } }), false);
+    assert.deepEqual(env.closedFiles, ['42']);
+});
+check('plan edit is blocked for locked journal or mismatching recorded magic', () => {
+    assert.equal(runCanEdit({ positions: [newPosition], lockedJournal: true, journals: {
+        42: { valid: true, state: state() },
+    } }), false);
+    assert.equal(runCanEdit({ positions: [newPosition], journals: {
+        42: { valid: true, state: state({ magic: 999 }) },
+    } }), false);
+});
+check('plan edit ignores positions outside symbol and magic scope', () => {
+    assert.equal(runCanEdit({ positions: [{ ...newPosition, magic: 999 }] }), true);
+    assert.equal(runCanEdit({ positions: [{ ...newPosition, symbol: 'OTHER' }] }), true);
+});
+
+function capture(overrides = {}) {
+    resetEnvironment({ orders: [{ ticket: 100, sl: 90, active: false }], ...overrides });
+    context.RRActivePlan = { count: 3, targets: [
+        { multiple: 1, percent: 0, move_be: 1 },
+        { multiple: 2.5, percent: 40, move_be: 0 },
+        { multiple: 6, percent: 60, move_be: 1 },
+    ] };
+    const s = {};
+    return { ok: context.RRCapture(456, s), s };
+}
+check('new capture freezes complete target list and actual initial risk', () => {
+    const { ok, s } = capture();
+    assert.equal(ok, true); assert.equal(s.version, 2); assert.equal(s.target_count, 3);
+    assert.equal(s.entry, 100); assert.equal(s.risk, 10); assert.equal(s.initial_volume, 1);
+    assert.deepEqual(s.target_r.slice(0, 3), [1, 2.5, 6]);
+    assert.deepEqual(s.target_percent.slice(0, 3), [0, 40, 60]);
+    assert.deepEqual(s.target_be.slice(0, 3), [1, 0, 1]);
+    assert.equal(s.final_r, 6); assert.equal(s.stage, 0); assert.equal(s.be_requested, 0);
+});
+check('editing active plan cannot change already captured position plan', () => {
+    const { s } = capture();
+    context.RRActivePlan.targets[1].multiple = 8;
+    context.RRActivePlan.targets[1].percent = 70;
+    context.RRActivePlan.targets[0].move_be = 0;
+    assert.equal(s.target_r[1], 2.5); assert.equal(s.target_percent[1], 40); assert.equal(s.target_be[0], 1);
+});
+check('capture refuses arbitrary historical positions and incomplete opening fills', () => {
+    assert.equal(capture({ existingIDs: [42] }).ok, false);
+    assert.equal(capture({ orders: [{ ticket: 100, sl: 90, active: true }] }).ok, false);
+});
+check('capture uses new-position initial stop only when history order has none', () => {
+    const { ok, s } = capture({ orders: [{ ticket: 100, sl: 0, active: false }], sl: 92 });
+    assert.equal(ok, true); assert.equal(s.risk, 8);
+});
+check('capture refuses positions without a protective initial stop', () => {
+    assert.equal(capture({ orders: [{ ticket: 100, sl: 0, active: false }], sl: 0 }).ok, false);
+    assert.equal(capture({ orders: [{ ticket: 100, sl: 101, active: false }] }).ok, false);
+});
+
+process.stdout.write(`\n${passed} manager tests passed against production RRProcess/RRProcessMulti/RRResolvePending/RRUpdateStops/RRCapture/RRPlanCanEdit.\n`);
 process.stdout.write('Scope: simulated MT5 boundaries; no real trading requests, terminal compilation or journal IO.\n');

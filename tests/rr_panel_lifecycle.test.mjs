@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const production = readFileSync(new URL('../mt5/Position Sizer.mqh', import.meta.url), 'utf8');
+const production = readFileSync(new URL('../mt5/Position Sizer.mqh', import.meta.url), 'utf8')
+    + '\n' + readFileSync(new URL('../mt5/RRPlanPanel.mqh', import.meta.url), 'utf8');
 const beforeFix = readFileSync(new URL('./fixtures/panel-before-lifecycle-fix.mqh', import.meta.url), 'utf8');
 const entrySource = readFileSync(new URL('../mt5/Position Sizer RR.mq5', import.meta.url), 'utf8');
 const recoverySource = readFileSync(new URL('../mt5/RRPanelRecovery.mqh', import.meta.url), 'utf8');
@@ -41,7 +42,7 @@ function adapt(body) {
 }
 const methods = ['InitVariables', 'Maximize', 'Minimize', 'HideShowMaximize', '~CPositionSizeCalculator',
     'HideMain', 'HideRisk', 'HideMargin', 'HideSwaps', 'HideTrading'];
-const tabs = ['Main', 'Risk', 'Margin', 'Swaps', 'Trading'];
+const tabs = ['Main', 'Risk', 'Margin', 'Swaps', 'Trading', 'RR'];
 const listNames = [...tabs.map(tab => `${tab}TabList`), 'PersistentList'];
 
 function fixture(source = production) {
@@ -51,6 +52,7 @@ function fixture(source = production) {
         CONTROLS_BUTTON_COLOR_DISABLE: 0, CHART_WIDTH_IN_PIXELS: 1, OBJPROP_SELECTED: 2,
         TERMINAL_SCREEN_DPI: 3, ACCOUNT_CURRENCY_DIGITS: 4,
         m_controls_ready: false, m_minimized: false, NoPanelMaximization: false,
+        m_rr_page: 0, m_rr_count: 0, m_rr_visible: false,
         sets: { SelectedTab: 'Main', IsPanelMinimized: false, TakeProfitsNumber: 1 },
         remember_left: -1, remember_top: -1, MaxTakeProfitsNumber: 1, LinesSelectedStatus: 0,
         ChartWidth: 0, CheckboxOnFile: '', CheckboxOffFile: '', RadiogroupOnFile: '', RadiogroupOffFile: '',
@@ -64,6 +66,7 @@ function fixture(source = production) {
         Hide: () => events.push('panel-hide'), Show: () => events.push('panel-show'),
         Move: (...args) => events.push(`move:${args.join(',')}`),
         MoveAndResize: () => events.push('resize'), IniFileSave: () => events.push('ini-save'),
+        CaptureRRPage: () => events.push('capture-rr-draft'),
         m_min_rect: { Move: (...args) => events.push(`min-rect:${args.join(',')}`) },
         m_chart: { Detach: () => events.push('detach') },
         CheckPointer: value => value && !value.deleted ? value.pointerType : 'invalid',
@@ -84,7 +87,7 @@ function fixture(source = production) {
     }
     for (const name of listNames) sandbox[name] = null;
     for (const tab of tabs) {
-        sandbox[`${tab}Tab`] = tab;
+        sandbox[tab === 'RR' ? 'RRTargetsTab' : `${tab}Tab`] = tab;
         sandbox[`m_BtnTab${tab}`] = { ColorBackground: () => events.push(`color:${tab}`) };
         sandbox[`Show${tab}`] = () => events.push(`show:${tab}`);
     }
@@ -99,7 +102,7 @@ function fixture(source = production) {
             return true;
         },
     };
-    const functionTexts = methods.map(name => {
+    const functionTexts = [...methods, ...(source === production ? ['HideRR'] : [])].map(name => {
         const { body, args } = extract(source, name);
         return `function ${name.startsWith('~') ? 'PanelDestructor' : name}(${args.join(',')}) {${adapt(body)}}`;
     });
@@ -200,7 +203,7 @@ check('partial construction failures remain callable and safely destructible', (
 check('ready Maximize still hides all tabs and shows each selected tab', () => {
     for (const tab of tabs) {
         const f = fixture(); f.ready(); f.context.sets.SelectedTab = tab; f.context.Maximize();
-        assert.equal(f.events.filter(event => event.startsWith('read:')).length, 5);
+        assert.equal(f.events.filter(event => event.startsWith('read:')).length, tabs.length);
         assert.deepEqual(f.events.filter(event => event.startsWith('show:')), [`show:${tab}`]);
         assert.ok(f.events.includes('resize'));
     }
@@ -225,8 +228,28 @@ check('Destroy revokes readiness before base destruction and subsequent callback
 });
 check('destructor frees all dynamic lists once and handles an empty repeated cleanup', () => {
     const f = fixture(); f.ready(); f.context.PanelDestructor(); f.context.PanelDestructor();
-    assert.equal(f.events.filter(event => event.startsWith('delete:')).length, 6);
+    assert.equal(f.events.filter(event => event.startsWith('delete:')).length, listNames.length);
     assert.equal(f.context.m_controls_ready, false);
+});
+
+check('hiding the RR tab captures its draft before hiding controls', () => {
+    const f = fixture(); f.ready(); f.context.m_rr_visible = true;
+    f.context.HideRR();
+    assert.equal(f.events[0], 'capture-rr-draft');
+    assert.equal(f.context.m_rr_visible, false);
+    assert.ok(f.events.includes('hide:RRTabList'));
+});
+check('hiding an uncreated RR tab does not dereference its list', () => {
+    const f = fixture(); f.context.HideRR();
+    assert.deepEqual(f.events, []);
+});
+check('draft BE checkboxes never enter the generic panel layout stream', () => {
+    const wrapper = /class\s+CRRPlanCheckBox\s*:\s*public\s+CCheckBox\s*\{([\s\S]*?)\};/.exec(production);
+    assert.ok(wrapper, 'RR draft checkbox wrapper is missing');
+    for (const method of ['Save', 'Load']) {
+        assert.match(wrapper[1], new RegExp(`virtual\\s+bool\\s+${method}\\s*\\(const int file_handle\\)\\s*\\{\\s*return true;\\s*\\}`));
+    }
+    assert.match(production, /CRRPlanCheckBox\s+m_ChkRRBreakEven\[5\]/);
 });
 
 function globalFunction(source, name) {

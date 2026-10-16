@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.141"
-string    Version = "3.14 - RR 1.01";
+#property version   "3.150"
+string    Version = "3.14 - RR 1.10";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -24,6 +24,7 @@ string    Version = "3.14 - RR 1.01";
 #property description DESCRIPTION_LINE_3
 #property description DESCRIPTION_LINE_4
 
+#include "RRPlan.mqh"
 #include "Position Sizer RR.mqh"
 #include "RRPanelRecovery.mqh"
 #include "Position Sizer.mqh";
@@ -638,7 +639,7 @@ int OnInit()
 
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
-    Print("[PS RR] RR 1.01 面板初始化完成。");
+    Print("[PS RR] RR 1.10 面板初始化完成。");
     return INIT_SUCCEEDED;
 }
 

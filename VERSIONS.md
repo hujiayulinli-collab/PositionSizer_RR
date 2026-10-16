@@ -1,6 +1,6 @@
 # 历史版本
 
-本仓库保存 Position Sizer RR 的 12 个已打包版本。建议新安装使用 [RR 1.71](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/tag/v1.71)。
+本仓库保存 Position Sizer RR 的 13 个已打包版本。建议新安装使用 [RR 1.72](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/tag/v1.72)。
 
 历史版本保持原始源码与 EX5，可能包含后续版本已经修复的问题。GitHub 发布包补充了上游 Apache License 2.0 许可证与衍生项目归属说明，原始本地 ZIP 未修改。
 
@@ -18,6 +18,7 @@
 | [v1.62](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/tag/v1.62) | 3.202 | 移除快捷比例下拉框，手动输入框后显示 %；移除主页品种切换，开仓使用当前图表品种，保留全账户持仓选择。 |
 | [v1.70](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/tag/v1.70) | 3.210 | 新增父交易组分批市价开仓，统一设置子单手数上限和最短间隔，按整组风险预算建仓并管理整组止盈、BE 与比例平仓。 |
 | [v1.71](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/tag/v1.71) | 3.211 | 每条未触发 TP 线可单独拖到指定价格，松开即保存并自动反算 R，保留原平仓比例和 BE；父组继续共用一套目标。 |
+| [v1.72](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/tag/v1.72) | 3.212 | 分批开仓间隔支持 100 毫秒起的整数设置，毫秒定时推进；旧秒设置与旧父组兼容，保留实际成交和止损确认屏障。 |
 
 每个 Release 提供对应版本的下载包。安装文件位于包内 `mt5/Position Sizer RR.ex5`；部分历史包多一层 `PositionSizer_RR` 目录。请同时阅读对应版本 README 和升级说明。
 

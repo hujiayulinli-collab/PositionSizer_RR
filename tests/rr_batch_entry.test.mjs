@@ -17,7 +17,9 @@ function bodyOf(name) {
 function translate(name) {
     const fn = bodyOf(name);
     let body = fn.body
-        .replace(/\b(?:MqlTick|MqlTradeRequest|MqlTradeResult|MqlTradeCheckResult|RBGroup)\s+(\w+)\s*;/g, 'let $1 = {};')
+        .replace(/\b(?:MqlTick|MqlTradeRequest|MqlTradeResult|MqlTradeCheckResult|RBGroup|RBSettingsRecord)\s+(\w+)\s*;/g, 'let $1 = {};')
+        .replace(/\bRRPlan\s+(\w+)\s*;/g, 'let $1 = { targets: Array.from({length: 20}, () => ({})) };')
+        .replace(/sizeof\((?:RBSettingsRecord|RBGroup)\)/g, '1')
         .replace(/\bulong\s+(\w+)\[\]\s*;/g, 'let $1 = [];')
         .replace(/\b(?:const\s+)?(?:int|long|uint|ulong|double|bool|string)\s+(?=[A-Za-z_]\w*\s*(?:=|;))/g, 'let ')
         .replace(/\((?:int|long|uint|ulong|double|datetime)\)/g, '')
@@ -114,7 +116,7 @@ const context = vm.createContext({
     AccountInfoInteger: key => key === 'ACCOUNT_MARGIN_MODE' ? 'ACCOUNT_MARGIN_MODE_RETAIL_HEDGING' : 1,
     RCTradeLeave: () => env.events.push(['leave']),
 });
-for (const name of ['RBNextVolume', 'RBSpacingReady', 'RBValidSettings', 'RBDirectionForOrder', 'RBFreezeExit',
+for (const name of ['RBNextVolume', 'RBSpacingReady', 'RBValidSettings', 'RBStoredIntervalMilliseconds', 'RBGroupIntervalMilliseconds', 'RBDirectionForOrder', 'RBFreezeExit',
     'RBStopGroupEntry', 'RBResolvePending', 'RBDefiniteEntryReject', 'RBSendNext', 'RBReleaseOwner', 'RBCancelEntry', 'RBManageEntry', 'RBInit']) vm.runInContext(translate(name), context);
 let checks = 0;
 function test(name, fn) { reset(); fn(); console.log(`PASS ${++checks}: ${name}`); }
@@ -143,11 +145,24 @@ for (const [label, values] of [ ['NaN', [NaN,0,500,0,10,5,20,.01,.01]], ['negati
     ['zero step', [40,0,500,0,10,5,20,.01,0]], ['zero risk', [40,0,500,0,0,5,20,.01,.01]],
     ['infinite cap', [40,0,500,0,10,Infinity,20,.01,.01]], ['overshot risk', [40,5,500,501,10,5,20,.01,.01]] ])
     test(`invalid budget input ${label} fails closed`, () => assert.equal(context.RBNextVolume(...values), 0));
-test('spacing enforces 1000ms, independent of wall-clock second boundary', () => { assert.equal(context.RBSpacingReady(2000,1999,1),false); assert.equal(context.RBSpacingReady(2998,1999,1),false); assert.equal(context.RBSpacingReady(2999,1999,1),true); });
-test('clock reversal does not release spacing gate', () => assert.equal(context.RBSpacingReady(999,1000,1),false));
-test('first child is eligible immediately', () => assert.equal(context.RBSpacingReady(999,0,1),true));
-test('interval settings cannot disable minimum one second', () => { assert.equal(context.RBValidSettings(5,0,0),false); assert.equal(context.RBValidSettings(5,1,0),true); assert.equal(context.RBValidSettings(5,3601,0),false); });
-test('invalid lot/deviation settings rejected', () => { assert.equal(context.RBValidSettings(0,1,0),false); assert.equal(context.RBValidSettings(NaN,1,0),false); assert.equal(context.RBValidSettings(5,1,-1),false); });
+test('spacing enforces 1000ms, independent of wall-clock second boundary', () => { assert.equal(context.RBSpacingReady(2000,1999,1000),false); assert.equal(context.RBSpacingReady(2998,1999,1000),false); assert.equal(context.RBSpacingReady(2999,1999,1000),true); });
+test('100ms spacing rejects 99ms and permits exactly 100ms', () => { assert.equal(context.RBSpacingReady(2098,1999,100),false); assert.equal(context.RBSpacingReady(2099,1999,100),true); });
+test('clock reversal does not release spacing gate', () => assert.equal(context.RBSpacingReady(999,1000,100),false));
+test('first child is eligible immediately', () => assert.equal(context.RBSpacingReady(999,0,100),true));
+test('interval settings enforce 100–3600000ms including both boundaries', () => {
+    for(const interval of [-1,0,1,99,3600001]) assert.equal(context.RBValidSettings(5,interval,0),false);
+    for(const interval of [100,250,1000,3600000]) assert.equal(context.RBValidSettings(5,interval,0),true);
+    assert.equal(context.RBSpacingReady(1000,0,0),false);
+});
+test('invalid lot/deviation settings rejected', () => { assert.equal(context.RBValidSettings(0,100,0),false); assert.equal(context.RBValidSettings(NaN,100,0),false); assert.equal(context.RBValidSettings(5,100,-1),false); });
+test('legacy group seconds and new group milliseconds have separate interpretation', () => {
+    assert.equal(context.RBGroupIntervalMilliseconds(group({version:1,interval_seconds:1})),1000);
+    assert.equal(context.RBGroupIntervalMilliseconds(group({version:1,interval_seconds:3600})),3600000);
+    assert.equal(context.RBGroupIntervalMilliseconds(group({version:2,interval_seconds:100})),100);
+    assert.equal(context.RBGroupIntervalMilliseconds(group({version:2,interval_seconds:1000})),1000);
+    for(const [version,interval] of [[1,0],[1,3601],[1,2147483647],[2,1],[2,99],[2,3600001],[3,100]])
+        assert.equal(context.RBStoredIntervalMilliseconds(version,interval),0);
+});
 
 test('entry submits intent first then one request with immediate SL and parent child comment', () => {
     const g = group(); assert.equal(context.RBSendNext(1,g,error()),true);
@@ -268,6 +283,129 @@ test('running second panel cancels an orphan after its owner disappears', () => 
     context.RBManageEntry(); assert.equal(env.records[0].entry_state,2); assert.equal(env.records[0].exit_ready,1);
     assert.equal(env.events.some(e=>e[0]==='send'),false);
 });
+test('100ms queue sends only at the boundary and then waits for final fill', () => {
+    env.records=[group({version:2,interval_seconds:100})];
+    context.RBActiveParent=123; context.RBAccountLock=77; context.RBLastSendTick=10000;
+    env.tickNow=10099; context.RBManageEntry(); assert.equal(env.events.some(e=>e[0]==='send'),false);
+    env.tickNow=10100; context.RBManageEntry(); assert.equal(env.events.filter(e=>e[0]==='send').length,1);
+    assert.equal(context.RBLastSendTick,10100);
+    env.tickNow=10200; context.RBManageEntry(); env.tickNow=50000; context.RBManageEntry();
+    assert.equal(env.events.filter(e=>e[0]==='send').length,1); assert.equal(env.records[0].pending,1);
+});
+test('slow confirmation releases at most one child without catching up missed slots', () => {
+    const g=group({version:2,interval_seconds:100,pending:1,pending_order:900,pending_volume:5});
+    env.records=[g]; context.RBActiveParent=123; context.RBAccountLock=77; context.RBLastSendTick=10000;
+    env.tickNow=50000; context.RBManageEntry(); assert.equal(env.events.some(e=>e[0]==='send'),false);
+    fill(g); context.RBManageEntry(); assert.equal(env.events.filter(e=>e[0]==='send').length,1);
+    assert.equal(context.RBLastSendTick,50000); assert.equal(env.records[0].child_count,1);
+    env.orders=[]; env.deals=[]; context.RBManageEntry(); env.tickNow=50099; context.RBManageEntry();
+    assert.equal(env.events.filter(e=>e[0]==='send').length,1);
+});
+test('100ms queue cannot continue after the confirmed previous fill has unsafe SL', () => {
+    const g=group({version:2,interval_seconds:100,pending:1,pending_order:900,pending_volume:5});
+    env.records=[g]; context.RBActiveParent=123; context.RBAccountLock=77; context.RBLastSendTick=10000;
+    env.tickNow=10100; fill(g); env.safety=false; context.RBManageEntry();
+    assert.equal(env.events.some(e=>e[0]==='send'),false); assert.equal(env.records[0].entry_state,3);
+});
+test('legacy one-second queue does not become a one-millisecond queue', () => {
+    env.records=[group({version:1,interval_seconds:1})];
+    context.RBActiveParent=123; context.RBAccountLock=77; context.RBLastSendTick=10000;
+    for(const tick of [10001,10100,10999]) { env.tickNow=tick; context.RBManageEntry(); }
+    assert.equal(env.events.some(e=>e[0]==='send'),false);
+    env.tickNow=11000; context.RBManageEntry(); assert.equal(env.events.filter(e=>e[0]==='send').length,1);
+});
+test('100ms queue remains cancelled on cold restart with no automatic resubmission', () => {
+    env.records=[group({version:2,interval_seconds:100,filled_volume:5,filled_value:500,child_count:1,child_order:[900]})];
+    context.RBInit();assert.equal(context.RBActiveParent,0);assert.equal(env.records[0].entry_state,2);
+    assert.equal(env.records[0].version,2);assert.equal(env.records[0].interval_seconds,100);
+    assert.equal(env.events.some(e=>e[0]==='send'),false);
+});
+
+// Exercise actual settings read/load/append and parent checksum validation with
+// a record-sized in-memory file. The record itself stays in the persisted unit.
+function diskFixture() {
+    const disk={ records:[], exists:false, cursor:0, busy:false, writeOK:true };
+    const hash=value=>{ let h=2166136261; for(const c of String(value)) h=Math.imul(h^c.charCodeAt(0),16777619)>>>0; return h; };
+    const c=vm.createContext({ ...Object.fromEntries(symbols.map(key=>[key,key])), INVALID_HANDLE:-1,
+        RB_MAX_CHILDREN:64,RR_MAX_TARGETS:20,RBEnabled:false,RBChildMaxLots:5,RBIntervalMilliseconds:1000,RBMaxDeviationPoints:0,RBSettingsReady:false,RBCorruptJournal:false,RBLastStatus:'',
+        MathIsValidNumber:Number.isFinite,MathAbs:Math.abs,MathMax:Math.max,DoubleToString:(v,d)=>v.toFixed(d),IntegerToString:String,
+        RRHash:hash,RRChecksum:()=>77,StringFormat:(format,...args)=>{let i=0;return format.replace(/%(?:I64[ud]|[ud])/g,()=>args[i++]);},
+        AccountInfoInteger:()=>1,AccountInfoString:()=>'test',RBSettingsFile:()=>'settings',RBAccountBusy:()=>disk.busy,
+        FileIsExist:()=>disk.exists,FileOpen:()=>1,FileClose:()=>{},FileSize:()=>disk.records.length,
+        FileSeek:(handle,offset,origin)=>{disk.cursor=origin==='SEEK_END'?disk.records.length+offset:offset;return true;},
+        FileReadStruct:(handle,target)=>{if(!disk.records[disk.cursor])return 0;Object.assign(target,structuredClone(disk.records[disk.cursor]));return 1;},
+        FileWriteStruct:(handle,value)=>{if(!disk.writeOK)return 0;disk.records[disk.cursor]=structuredClone(value);disk.cursor++;disk.exists=true;return 1;},
+        FileFlush:()=>{},ResetLastError:()=>{},GetLastError:()=>0,
+        ZeroMemory:value=>{for(const key of Object.keys(value))if(key!=='targets')delete value[key];},
+        RBGroupSymbol:g=>String.fromCharCode(...g.symbol.filter(c=>c!==0)),RRPlanValidate:()=>true,
+    });
+    for(const name of ['RBValidSettings','RBStoredIntervalMilliseconds','RBGroupIntervalMilliseconds','RBSettingsChecksum',
+        'RBReadSettings','RBLoadSettings','RBSaveSettings','RBGroupChecksum','RBLoadGroup','RBSaveGroup']) vm.runInContext(translate(name),c);
+    function settings(version,interval,overrides={}) {
+        const s={version,enabled:1,child_max:5,interval,deviation:20,...overrides};s.checksum=c.RBSettingsChecksum(s);return s;
+    }
+    function parent(version,interval) {
+        const g={};
+        for(const m of types.slice(types.indexOf('struct RBGroup'),types.indexOf('bool RBEnabled')).matchAll(/\b(?:uint|ulong|long|int|double|ushort)\s+(\w+)(\[[^\]]+\])?;/g))
+            g[m[1]]=m[2]?Array(64).fill(0):0;
+        Object.assign(g,{version,parent_id:123,account:1,server_hash:hash('test'),magic:99,direction:1,planned_volume:40,
+            risk_budget:500,stop_loss:99,reference_price:100,child_max_lots:5,interval_seconds:interval});
+        [...'EURUSD'].forEach((v,i)=>{g.symbol[i]=v.charCodeAt(0);});
+        g.exit_state={stage:0,target_count:1,blocked:0,be_requested:0,be_done:0,offset_points:0,
+            target_r:[2],target_percent:[100],target_be:[0]};
+        g.checksum=c.RBGroupChecksum(g);return g;
+    }
+    return {disk,c,settings,parent};
+}
+test('settings v1 checksum is validated in seconds then loaded as milliseconds', () => {
+    const {disk,c,settings}=diskFixture();disk.exists=true;disk.records=[settings(1,1)];
+    const original=structuredClone(disk.records[0]);assert.equal(c.RBLoadSettings(),true);
+    assert.equal(c.RBIntervalMilliseconds,1000);assert.equal(c.RBSettingsReady,true); assert.deepEqual(disk.records[0],original);
+    disk.records=[settings(1,3600)];assert.equal(c.RBLoadSettings(),true);assert.equal(c.RBIntervalMilliseconds,3600000);
+});
+test('default settings keep 1000ms and saved v2 settings keep exact milliseconds', () => {
+    const {disk,c}=diskFixture();assert.equal(c.RBLoadSettings(),true);assert.equal(c.RBIntervalMilliseconds,1000);
+    assert.equal(c.RBSaveSettings(true,5,100,0,error()),true);
+    assert.equal(disk.records[0].version,2);assert.equal(disk.records[0].interval,100);assert.equal(c.RBIntervalMilliseconds,100);
+    c.RBIntervalMilliseconds=9999;assert.equal(c.RBLoadSettings(),true);assert.equal(c.RBIntervalMilliseconds,100);
+});
+test('saving after v1 appends v2 without rewriting the legacy record or checksum', () => {
+    const {disk,c,settings}=diskFixture();disk.exists=true;disk.records=[settings(1,2)];
+    const original=structuredClone(disk.records[0]);assert.equal(c.RBLoadSettings(),true);assert.equal(c.RBIntervalMilliseconds,2000);
+    assert.equal(c.RBSaveSettings(true,5,250,0,error()),true);assert.equal(disk.records.length,2);
+    assert.deepEqual(disk.records[0],original);assert.equal(disk.records[1].version,2);assert.equal(disk.records[1].interval,250);
+    assert.equal(c.RBLoadSettings(),true);assert.equal(c.RBIntervalMilliseconds,250);
+});
+test('invalid settings version, unit, or checksum fails closed before runtime use', () => {
+    for(const [version,interval] of [[1,0],[1,3601],[2,99],[2,3600001],[3,100]]) {
+        const {disk,c,settings}=diskFixture();disk.exists=true;disk.records=[settings(version,interval)];
+        assert.equal(c.RBLoadSettings(),false);assert.equal(c.RBSettingsReady,false);assert.equal(c.RBIntervalMilliseconds,1000);
+    }
+    const {disk,c,settings}=diskFixture();disk.exists=true;disk.records=[settings(1,1)];disk.records[0].interval=1000;
+    assert.equal(c.RBLoadSettings(),false);assert.equal(c.RBSaveSettings(true,5,100,0,error()),false);assert.equal(disk.records.length,1);
+});
+test('parent journals accept both versions while keeping checksums over raw stored units', () => {
+    const {disk,c,parent}=diskFixture();const old=parent(1,1);disk.records=[old];const loaded={};
+    assert.equal(c.RBLoadGroup(1,loaded),true);assert.equal(loaded.interval_seconds,1);assert.equal(c.RBGroupIntervalMilliseconds(loaded),1000);
+    const changed={...old,interval_seconds:1000};assert.notEqual(c.RBGroupChecksum(changed),old.checksum);
+    disk.records=[changed];assert.equal(c.RBLoadGroup(1,{}),false);
+    disk.records=[parent(2,100)];assert.equal(c.RBLoadGroup(1,loaded),true);assert.equal(c.RBGroupIntervalMilliseconds(loaded),100);
+    for(const [version,interval] of [[1,3601],[2,1],[2,99],[3,100]]){disk.records=[parent(version,interval)];assert.equal(c.RBLoadGroup(1,{}),false);}
+});
+test('updating a legacy parent appends the same v1 seconds format and checksum', () => {
+    const {disk,c,parent}=diskFixture();const original=parent(1,2);disk.records=[structuredClone(original)];const loaded={};
+    assert.equal(c.RBLoadGroup(1,loaded),true);loaded.entry_state=2;
+    assert.equal(c.RBSaveGroup(1,loaded),true);assert.equal(disk.records.length,2);assert.deepEqual(disk.records[0],original);
+    assert.equal(disk.records[1].version,1);assert.equal(disk.records[1].interval_seconds,2);
+    assert.equal(disk.records[1].checksum,c.RBGroupChecksum(disk.records[1]));
+    const latest={};assert.equal(c.RBLoadGroup(1,latest),true);assert.equal(latest.entry_state,2);
+    assert.equal(c.RBGroupIntervalMilliseconds(latest),2000);
+});
+test('new parent freezes the v2 millisecond setting without changing disk field layout', () => {
+    assert.match(bodyOf('RBQueue').body,/g\.version = 2/);assert.match(bodyOf('RBQueue').body,/g\.interval_seconds = RBIntervalMilliseconds/);
+    assert.match(types,/int interval_seconds;/);assert.doesNotMatch(types,/int interval_milliseconds;/);
+});
+
 test('parent journal includes manual/risk exit state in checksum', () => {
     for(const field of ['manual_active','manual_target_remaining','manual_created','manual_completed','risk_latched']) {
         assert.ok(types.includes(field)); assert.ok(bodyOf('RBGroupChecksum').body.includes(`g.${field}`));

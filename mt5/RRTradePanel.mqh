@@ -37,8 +37,9 @@ bool CPositionSizeCalculator::CreateTradeControlOptions()
     y += (int)MathRound(24 * m_DPIScale);
     if (!LabelCreate(TradingTabList, m_LblBatchLots, x, y, x + (int)MathRound(80 * m_DPIScale), y + h, "m_LblBatchLots", "子单上限(手)")) return false;
     if (!EditCreate(TradingTabList, m_EdtBatchLots, x + (int)MathRound(84 * m_DPIScale), y, x + (int)MathRound(140 * m_DPIScale), y + h, "m_EdtBatchLots", DoubleToString(RBChildMaxLots, CountDecimalPlaces(RBChildMaxLots)))) return false;
-    if (!LabelCreate(TradingTabList, m_LblBatchInterval, x + (int)MathRound(153 * m_DPIScale), y, x + (int)MathRound(239 * m_DPIScale), y + h, "m_LblBatchInterval", "间隔（秒）")) return false;
-    if (!EditCreate(TradingTabList, m_EdtBatchInterval, x + (int)MathRound(246 * m_DPIScale), y, right, y + h, "m_EdtBatchInterval", IntegerToString(RBIntervalSeconds))) return false;
+    if (!LabelCreate(TradingTabList, m_LblBatchInterval, x + (int)MathRound(153 * m_DPIScale), y, x + (int)MathRound(239 * m_DPIScale), y + h, "m_LblBatchInterval", "间隔（毫秒）")) return false;
+    if (!EditCreate(TradingTabList, m_EdtBatchInterval, x + (int)MathRound(246 * m_DPIScale), y, right, y + h, "m_EdtBatchInterval", IntegerToString(RBIntervalMilliseconds))) return false;
+    ObjectSetString(m_chart_id, m_name + "m_EdtBatchInterval", OBJPROP_TOOLTIP, "最短发单间隔：100毫秒=0.1秒；仍须等待上一子单成交和止损确认。保存仅影响新父订单。");
     y += (int)MathRound(24 * m_DPIScale);
     if (!LabelCreate(TradingTabList, m_LblBatchDeviation, x, y, x + (int)MathRound(239 * m_DPIScale), y + h, "m_LblBatchDeviation", "最大入场偏离（点，0 关闭）")) return false;
     if (!EditCreate(TradingTabList, m_EdtBatchDeviation, x + (int)MathRound(246 * m_DPIScale), y, right, y + h, "m_EdtBatchDeviation", IntegerToString(RBMaxDeviationPoints))) return false;
@@ -159,10 +160,10 @@ void CPositionSizeCalculator::OnClickBatchSave()
 {
     double lots, interval, deviation;
     if (!RRPlanParseNumber(m_EdtBatchLots.Text(), lots) || lots <= 0 ||
-        !RRPlanParseNumber(m_EdtBatchInterval.Text(), interval) || interval < 1 || interval > 3600 || interval != MathFloor(interval) ||
+        !RRPlanParseNumber(m_EdtBatchInterval.Text(), interval) || interval < 100 || interval > 3600000 || interval != MathFloor(interval) ||
         !RRPlanParseNumber(m_EdtBatchDeviation.Text(), deviation) || deviation < 0 || deviation > 2147483647 || deviation != MathFloor(deviation))
     {
-        m_batch_feedback = "每子手数须大于0；间隔1–3600整数秒；偏离填非负整数点。";
+        m_batch_feedback = "每子手数须大于0；间隔100–3600000整数毫秒；偏离填非负整数点。";
         m_batch_feedback_error = true;
         RefreshBatchStatus(); return;
     }
@@ -172,7 +173,7 @@ void CPositionSizeCalculator::OnClickBatchSave()
         m_batch_feedback = error; m_batch_feedback_error = true;
         RefreshBatchStatus(); return;
     }
-    m_batch_feedback = "分批设置已保存；主页面按整组计算总手数。";
+    m_batch_feedback = "分批设置已保存，仅影响新父订单；100毫秒=0.1秒，仍等成交与止损确认。";
     m_batch_feedback_error = false;
     RefreshValues();
     RefreshBatchStatus();

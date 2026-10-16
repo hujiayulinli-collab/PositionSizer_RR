@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.211"
-string    Version = "3.14 - RR 1.71";
+#property version   "3.212"
+string    Version = "3.14 - RR 1.72";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -202,6 +202,8 @@ bool RRPanelInitSucceeded = false;
 // Global variables:
 bool Dont_Move_the_Panel_to_Default_Corner_X_Y = true;
 ulong LastRecalculationTime = 0;
+ulong RRLastTimerManagement = 0;
+ulong RRLastTimerView = 0;
 bool StopLossLineIsBeingMoved = false;
 bool TakeProfitLineIsBeingMoved[]; // Separate for each TP.
 uchar MainKey_TradeHotKey = 0, MainKey_SwitchOrderTypeHotKey = 0, MainKey_SwitchEntryDirectionHotKey = 0, MainKey_SwitchHideShowLinesHotKey = 0, MainKey_SetStopLossHotKey = 0, MainKey_SetTakeProfitHotKey = 0, MainKey_SetEntryHotKey = 0, MainKey_MinimizeMaximizeHotkey = 0, MainKey_SwitchSLPointsLevelHotKey = 0, MainKey_SwitchTPPointsLevelHotKey = 0;
@@ -555,7 +557,7 @@ int OnInit()
         ExtDialog.ChartEvent(CHARTEVENT_CHART_CHANGE, lparam, dparam, sparam);
     }
 
-    if (!EventSetTimer(1)) Print(TRANSLATION_MESSAGE_ERROR_SETTING_TIMER + ": ", GetLastError());
+    if (!RRStartTimer()) return INIT_FAILED;
     
     if (ShowATROptions) ExtDialog.InitATR();
 
@@ -636,7 +638,7 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] RR 1.71 面板初始化完成。持仓未触发的 TP 线可双击选中后拖动修改价格。");
+    Print("[PS RR] RR 1.72 面板初始化完成。分批开仓间隔支持毫秒设置，最短100毫秒；实际发送仍等待成交和止损确认。");
     return INIT_SUCCEEDED;
 }
 
@@ -1168,11 +1170,24 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
 //+------------------------------------------------------------------+
 //| Timer event handler                                              |
 //+------------------------------------------------------------------+
+bool RRStartTimer()
+{
+    RRLastTimerManagement = 0;
+    RRLastTimerView = 0;
+    if (EventSetMillisecondTimer(100)) return true;
+    Print(TRANSLATION_MESSAGE_ERROR_SETTING_TIMER + ": ", GetLastError());
+    return false; // Do not silently offer 100 ms while using a one-second timer.
+}
+
 void OnTimer()
 {
     if (!RRPanelInitSucceeded) return;
-    // RR exits also run when ticks on the chart are sparse; do not put this
-    // behind the panel's refresh throttle.
+    ulong now = GetTickCount64();
+    // Poll active entry batches at 100 ms even without chart ticks. At idle,
+    // retain the one-second management cadence and avoid needless disk scans.
+    if (!RBEntryActive() && RRLastTimerManagement != 0 && now - RRLastTimerManagement < 1000) return;
+    RRLastTimerManagement = now;
+    // Risk and exit management must remain ahead of every entry attempt.
     bool normal_exits_allowed = RGManage(sets.MagicNumber);
     RMManage();
     RBManageGroups();
@@ -1181,6 +1196,9 @@ void OnTimer()
     RCManageReverse();
     if (normal_exits_allowed && !RGEntryBlocked) RRManage("", sets.MagicNumber);
     RDFlushAlerts(sets.MagicNumber);
+    // Drawing/recalculation must not delay the next batch check unnecessarily.
+    if (RRLastTimerView != 0 && now - RRLastTimerView < 500) return;
+    RRLastTimerView = now;
     RRRefreshViews();
     /**
      * Release resource 50ms to prevent freeze

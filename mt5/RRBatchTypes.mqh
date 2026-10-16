@@ -22,7 +22,7 @@ struct RBGroup
     double stop_loss;
     double reference_price;
     double child_max_lots;
-    int interval_seconds;
+    int interval_seconds; // Legacy field name/layout: v1 stores seconds, v2 stores milliseconds.
     int max_deviation_points;
     double commission_per_lot; // Frozen round-trip estimate in account currency.
     int max_spread_points;
@@ -62,7 +62,7 @@ struct RBGroup
 
 bool RBEnabled = false;
 double RBChildMaxLots = 5;
-int RBIntervalSeconds = 1;
+int RBIntervalMilliseconds = 1000;
 int RBMaxDeviationPoints = 0;
 
 bool RBLoadSettings();

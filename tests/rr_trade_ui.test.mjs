@@ -41,7 +41,7 @@ class List {
     GetNextNode() { return this.nodes[++this.index] || null; }
     MoveListElementByName(name, index) { const i = this.nodes.findIndex(n => n.Name === name); const [node] = this.nodes.splice(i, 1); this.nodes.splice(index, 0, node); }
 }
-function fixture(scale = 1) {
+function fixture(scale = 1, savedIntervalMilliseconds = 1000) {
     const s = {
         first_column_start: Math.round(7 * scale), element_height: Math.round(20 * scale), m_DPIScale: scale,
         MainTabList: new List(), TradingTabList: new List(), m_chart_id: 1, m_name: 'panel',
@@ -50,13 +50,13 @@ function fixture(scale = 1) {
         m_minimized: false, NoPanelMaximization: false, PanelWidth: 350,
         CONTROLS_BUTTON_COLOR_DISABLE: 'inactive', CONTROLS_BUTTON_COLOR_ENABLE: 'active',
         ChartRedraw: () => {}, StringFind: (s, q) => s.indexOf(q), Height: value => s.height = value, Top: () => 0, Width: () => {},
-        RBEnabled: false, RBChildMaxLots: 5, RBIntervalSeconds: 1, RBMaxDeviationPoints: 0,
+        RBEnabled: false, RBChildMaxLots: 5, RBIntervalMilliseconds: savedIntervalMilliseconds, RBMaxDeviationPoints: 0,
         m_batch_feedback: '', m_batch_feedback_error: false, batchActive: false, batchStatus: '', batchSaveCalls: [], batchCancelCalls: 0, batchCancelAllowed: true, refreshValuesCalls: 0, batchSaveAllowed: true,
         RBEntryActive: () => s.batchActive, RBStatusText: () => s.batchStatus,
         RBSaveSettings: (enabled, lots, interval, deviation, error) => {
             s.batchSaveCalls.push({ enabled, lots, interval, deviation });
             if (!s.batchSaveAllowed) { error('保存失败；保持原设置'); return false; }
-            Object.assign(s, { RBEnabled: enabled, RBChildMaxLots: lots, RBIntervalSeconds: interval, RBMaxDeviationPoints: deviation }); return true;
+            Object.assign(s, { RBEnabled: enabled, RBChildMaxLots: lots, RBIntervalMilliseconds: interval, RBMaxDeviationPoints: deviation }); return true;
         },
         RBCancelEntry: () => { s.batchCancelCalls++; if (s.batchCancelAllowed) s.batchActive = false; }, RefreshValues: () => s.refreshValuesCalls++,
         parseNumber: text => /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(text.trim()) && Number.isFinite(Number(text)) ? Number(text) : null,
@@ -168,17 +168,49 @@ check('batch setting edits remain unapplied drafts across recurring status refre
     assert.equal(s.m_ChkBatchEnabled.Checked(), true); assert.equal(s.RBEnabled, false); assert.equal(s.batchSaveCalls.length, 0);
 });
 check('saving valid batch settings delegates once and recalculates whole group volume only after persistence', () => {
-    const s = fixture(); assert.equal(s.m_EdtBatchLots.Text(), '5'); assert.equal(s.m_EdtBatchInterval.Text(), '1');
-    s.m_ChkBatchEnabled.Checked(true); s.m_EdtBatchLots.Text('2.5'); s.m_EdtBatchInterval.Text('2'); s.m_EdtBatchDeviation.Text('30'); s.OnClickBatchSave();
-    assert.deepEqual(s.batchSaveCalls, [{ enabled: true, lots: 2.5, interval: 2, deviation: 30 }]); assert.equal(s.refreshValuesCalls, 1);
+    const s = fixture(); assert.equal(s.m_EdtBatchLots.Text(), '5'); assert.equal(s.m_EdtBatchInterval.Text(), '1000');
+    s.m_ChkBatchEnabled.Checked(true); s.m_EdtBatchLots.Text('2.5'); s.m_EdtBatchInterval.Text('250'); s.m_EdtBatchDeviation.Text('30'); s.OnClickBatchSave();
+    assert.deepEqual(s.batchSaveCalls, [{ enabled: true, lots: 2.5, interval: 250, deviation: 30 }]); assert.equal(s.refreshValuesCalls, 1);
     assert.equal(s.RBEnabled, true); assert.equal(s.batchActive, false); assert.equal(s.optionCalls.length, 0);
 });
 check('malformed or unsafe batch values cannot reach persistence or alter calculator sizing', () => {
-    for (const [field, value] of [['Lots', '0'], ['Lots', '-5'], ['Lots', '2..'], ['Interval', '0'], ['Interval', '1.5'], ['Interval', '3601'], ['Deviation', '-1'], ['Deviation', '1.5'], ['Deviation', '2147483648']]) {
+    for (const [field, value] of [['Lots', '0'], ['Lots', '-5'], ['Lots', '2..'], ['Interval', '0'], ['Interval', '1'], ['Interval', '99'], ['Interval', '100.5'], ['Interval', '250.5'], ['Interval', '3600001'], ['Interval', '100ms'], ['Deviation', '-1'], ['Deviation', '1.5'], ['Deviation', '2147483648']]) {
         const s = fixture(); s['m_EdtBatch' + field].Text(value); s.OnClickBatchSave();
         assert.equal(s.batchSaveCalls.length, 0, field + value); assert.equal(s.refreshValuesCalls, 0); assert.equal(s.m_batch_feedback_error, true);
         assert.match(s.m_LblBatchStatus.Text(), /每子手数须大于0/);
+        assert.match(s.m_batch_feedback, /100–3600000整数毫秒/);
     }
+});
+check('millisecond input accepts minimum, subsecond, one-second and maximum integer settings without conversion', () => {
+    for (const interval of [100, 250, 1000, 3600000]) {
+        const s = fixture(); s.m_ChkBatchEnabled.Checked(true); s.m_EdtBatchInterval.Text(String(interval)); s.OnClickBatchSave();
+        assert.deepEqual(s.batchSaveCalls, [{ enabled: true, lots: 5, interval, deviation: 0 }]);
+        assert.equal(s.RBIntervalMilliseconds, interval); assert.equal(s.m_batch_feedback_error, false);
+        assert.equal(s.refreshValuesCalls, 1);
+    }
+});
+check('creation displays saved milliseconds and explains confirmation barrier without changing stored settings', () => {
+    for (const interval of [100, 250, 1000, 3600000]) {
+        const s = fixture(1, interval);
+        assert.equal(s.m_LblBatchInterval.Text(), '间隔（毫秒）');
+        assert.equal(s.m_EdtBatchInterval.Text(), String(interval)); assert.equal(s.batchSaveCalls.length, 0);
+        const tooltip = s.tooltips.get('panelm_EdtBatchInterval');
+        assert.match(tooltip, /100毫秒=0.1秒/); assert.match(tooltip, /上一子单成交和止损确认/); assert.match(tooltip, /仅影响新父订单/);
+    }
+});
+check('active group rejection preserves saved interval, editable draft and queue without cancelling or entering trades', () => {
+    const s = fixture(); s.batchActive = true;
+    s.RBSaveSettings = (enabled, lots, interval, deviation, error) => {
+        s.batchSaveCalls.push({ enabled, lots, interval, deviation });
+        error('当前有父订单正在分批开仓，请结束或取消后再修改设置。'); return false;
+    };
+    s.m_EdtBatchInterval.Text('100'); s.OnClickBatchSave();
+    assert.equal(s.batchActive, true); assert.equal(s.batchCancelCalls, 0); assert.equal(s.cancelCalls, 0);
+    assert.equal(s.m_EdtBatchInterval.Text(), '100'); assert.equal(s.RBIntervalMilliseconds, 1000);
+    assert.equal(s.batchSaveCalls.length, 1); assert.equal(s.refreshValuesCalls, 0); assert.equal(s.optionCalls.length, 0);
+    assert.equal(s.m_batch_feedback_error, true); assert.match(s.m_batch_feedback, /当前有父订单正在分批开仓/);
+    assert.match(s.m_LblBatchStatus.Text(), /当前有父订单正在分批开仓/);
+    assert.equal(s.m_BtnBatchCancel.enabled, true);
 });
 check('failed batch persistence retains draft and old effective values with visible error', () => {
     const s = fixture(); s.batchSaveAllowed = false; s.m_EdtBatchLots.Text('3'); s.OnClickBatchSave();

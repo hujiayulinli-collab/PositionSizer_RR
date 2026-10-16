@@ -15,7 +15,7 @@ struct RBSettingsRecord
     uint version;
     int enabled;
     double child_max;
-    int interval;
+    int interval; // v1 seconds; v2 milliseconds. Keep the persisted POD layout.
     int deviation;
     uint checksum;
 };
@@ -53,7 +53,19 @@ uint RBSettingsChecksum(const RBSettingsRecord &s)
 bool RBValidSettings(const double child_max, const int interval, const int deviation)
 {
     return MathIsValidNumber(child_max) && child_max > 0 && child_max <= 1000000
-        && interval >= 1 && interval <= 3600 && deviation >= 0 && deviation <= 100000000;
+        && interval >= 100 && interval <= 3600000 && deviation >= 0 && deviation <= 100000000;
+}
+int RBStoredIntervalMilliseconds(const uint version, const int interval)
+{
+    // Validate the original unit before multiplying: old checksums always cover
+    // the original seconds, and invalid/unknown records never become 1 ms.
+    if (version == 1 && interval >= 1 && interval <= 3600) return interval * 1000;
+    if (version == 2 && interval >= 100 && interval <= 3600000) return interval;
+    return 0;
+}
+int RBGroupIntervalMilliseconds(const RBGroup &g)
+{
+    return RBStoredIntervalMilliseconds(g.version, g.interval_seconds);
 }
 bool RBReadSettings(const int handle, RBSettingsRecord &s)
 {
@@ -61,15 +73,16 @@ bool RBReadSettings(const int handle, RBSettingsRecord &s)
     if (size < sizeof(RBSettingsRecord) || size % sizeof(RBSettingsRecord) != 0) return false;
     if (!FileSeek(handle, (long)(size - sizeof(RBSettingsRecord)), SEEK_SET)
         || FileReadStruct(handle, s) != sizeof(RBSettingsRecord)) return false;
-    return s.version == 1 && (s.enabled == 0 || s.enabled == 1)
-        && RBValidSettings(s.child_max, s.interval, s.deviation) && s.checksum == RBSettingsChecksum(s);
+    return (s.enabled == 0 || s.enabled == 1)
+        && RBValidSettings(s.child_max, RBStoredIntervalMilliseconds(s.version, s.interval), s.deviation)
+        && s.checksum == RBSettingsChecksum(s);
 }
 bool RBLoadSettings()
 {
     RBSettingsReady = false;
     if (!FileIsExist(RBSettingsFile()))
     {
-        RBEnabled = false; RBChildMaxLots = 5; RBIntervalSeconds = 1; RBMaxDeviationPoints = 0;
+        RBEnabled = false; RBChildMaxLots = 5; RBIntervalMilliseconds = 1000; RBMaxDeviationPoints = 0;
         RBSettingsReady = true; return true;
     }
     int handle = FileOpen(RBSettingsFile(), FILE_READ | FILE_BIN);
@@ -79,7 +92,7 @@ bool RBLoadSettings()
     FileClose(handle);
     if (!ok) return false;
     RBEnabled = s.enabled != 0; RBChildMaxLots = s.child_max;
-    RBIntervalSeconds = s.interval; RBMaxDeviationPoints = s.deviation;
+    RBIntervalMilliseconds = RBStoredIntervalMilliseconds(s.version, s.interval); RBMaxDeviationPoints = s.deviation;
     RBSettingsReady = true;
     return true;
 }
@@ -87,14 +100,14 @@ bool RBSaveSettings(bool enabled, double child_max, int interval, int deviation,
 {
     error = "";
     if (!RBValidSettings(child_max, interval, deviation))
-    { error = "每个子单手数须大于 0；间隔为 1–3600 秒，偏离点数不能为负。"; return false; }
+    { error = "每个子单手数须大于 0；间隔为 100–3600000 毫秒，偏离点数不能为负。"; return false; }
     if (RBAccountBusy()) { error = "账户正在分批建仓，请先取消后续子单再修改。"; return false; }
     int handle = FileOpen(RBSettingsFile(), FILE_READ | FILE_WRITE | FILE_BIN);
     if (handle == INVALID_HANDLE) { error = "分批设置正被使用，稍后重试。"; return false; }
     RBSettingsRecord s;
     if (FileSize(handle) > 0 && !RBReadSettings(handle, s))
     { FileClose(handle); error = "分批设置校验失败，未覆盖原记录。"; return false; }
-    ZeroMemory(s); s.version = 1; s.enabled = (int)enabled; s.child_max = child_max;
+    ZeroMemory(s); s.version = 2; s.enabled = (int)enabled; s.child_max = child_max;
     s.interval = interval; s.deviation = deviation; s.checksum = RBSettingsChecksum(s);
     ResetLastError();
     bool ok = FileSeek(handle, 0, SEEK_END) && FileWriteStruct(handle, s) == sizeof(RBSettingsRecord);
@@ -103,7 +116,7 @@ bool RBSaveSettings(bool enabled, double child_max, int interval, int deviation,
     ok = ok && RBReadSettings(handle, verified) && verified.checksum == s.checksum;
     FileClose(handle);
     if (!ok) { RBSettingsReady = false; error = "分批设置写入未确认，暂停新开仓。"; return false; }
-    RBEnabled = enabled; RBChildMaxLots = child_max; RBIntervalSeconds = interval; RBMaxDeviationPoints = deviation;
+    RBEnabled = enabled; RBChildMaxLots = child_max; RBIntervalMilliseconds = interval; RBMaxDeviationPoints = deviation;
     RBSettingsReady = true;
     return true;
 }
@@ -144,7 +157,7 @@ bool RBLoadGroup(int handle, RBGroup &g)
     ulong size = FileSize(handle);
     if (size < sizeof(RBGroup) || size % sizeof(RBGroup) != 0) return false;
     if (!FileSeek(handle, (long)(size - sizeof(RBGroup)), SEEK_SET) || FileReadStruct(handle, g) != sizeof(RBGroup)) return false;
-    if (g.version != 1 || g.parent_id == 0 || g.account != AccountInfoInteger(ACCOUNT_LOGIN)
+    if (g.parent_id == 0 || g.account != AccountInfoInteger(ACCOUNT_LOGIN)
         || g.server_hash != RRHash(AccountInfoString(ACCOUNT_SERVER)) || g.checksum != RBGroupChecksum(g)
         || (g.direction != 1 && g.direction != -1) || g.symbol[63] != 0 || RBGroupSymbol(g) == ""
         || g.child_count < 0 || g.child_count > RB_MAX_CHILDREN || g.entry_state < 0 || g.entry_state > 3
@@ -154,7 +167,7 @@ bool RBLoadGroup(int handle, RBGroup &g)
         || !MathIsValidNumber(g.risk_budget) || g.risk_budget <= 0
         || !MathIsValidNumber(g.stop_loss) || g.stop_loss <= 0
         || !MathIsValidNumber(g.reference_price) || g.reference_price <= 0
-        || !RBValidSettings(g.child_max_lots, g.interval_seconds, g.max_deviation_points)
+        || !RBValidSettings(g.child_max_lots, RBGroupIntervalMilliseconds(g), g.max_deviation_points)
         || !MathIsValidNumber(g.commission_per_lot) || g.commission_per_lot < 0
         || !MathIsValidNumber(g.filled_volume) || g.filled_volume < 0
         || !MathIsValidNumber(g.filled_value) || g.filled_value < 0
@@ -337,9 +350,10 @@ double RBNextVolume(const double planned, const double filled, const double budg
         || volume * per_lot_risk > budget - used + 1e-7) return 0;
     return volume;
 }
-bool RBSpacingReady(const ulong now, const ulong previous, const int seconds)
+bool RBSpacingReady(const ulong now, const ulong previous, const int milliseconds)
 {
-    return previous == 0 || (now >= previous && now - previous >= (ulong)seconds * 1000);
+    return milliseconds >= 100 && milliseconds <= 3600000
+        && (previous == 0 || (now >= previous && now - previous >= (ulong)milliseconds));
 }
 bool RBRiskAtSL(const RBGroup &g, const double volume, const double price, double &money)
 {
@@ -536,12 +550,12 @@ bool RBQueue(double total_volume, string &error)
     if (!SymbolInfoTick(symbol, tick) || tick.bid <= 0 || tick.ask <= tick.bid || tick.time <= 0)
     { error = "当前报价无效。"; return false; }
     RBGroup g; ZeroMemory(g);
-    g.version = 1; g.account = AccountInfoInteger(ACCOUNT_LOGIN); g.server_hash = RRHash(AccountInfoString(ACCOUNT_SERVER));
+    g.version = 2; g.account = AccountInfoInteger(ACCOUNT_LOGIN); g.server_hash = RRHash(AccountInfoString(ACCOUNT_SERVER));
     g.magic = sets.MagicNumber; g.direction = sets.TradeDirection == Long ? 1 : -1;
     StringToShortArray(symbol, g.symbol, 0, 63); g.symbol[63] = 0;
     g.planned_volume = total_volume; g.risk_budget = RiskMoney;
     g.stop_loss = sets.StopLossLevel; g.reference_price = g.direction == 1 ? tick.ask : tick.bid;
-    g.child_max_lots = RBChildMaxLots; g.interval_seconds = RBIntervalSeconds; g.max_deviation_points = RBMaxDeviationPoints;
+    g.child_max_lots = RBChildMaxLots; g.interval_seconds = RBIntervalMilliseconds; g.max_deviation_points = RBMaxDeviationPoints;
     g.commission_per_lot = CalculateCommission() * 2;
     g.max_spread_points = sets.MaxSpread; g.slippage_points = (int)MathMax(0, sets.MaxSlippage); g.close_opposite = (int)RCCloseOpposite;
     g.max_trades_total = sets.MaxNumberOfTradesTotal; g.max_trades_symbol = sets.MaxNumberOfTradesPerSymbol;
@@ -728,7 +742,7 @@ void RBManageEntry()
             if (!allowed || g.account != AccountInfoInteger(ACCOUNT_LOGIN) || g.server_hash != RRHash(AccountInfoString(ACCOUNT_SERVER))
                 || AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING || g.risk_latched != 0)
             { g.entry_state = RB_ENTRY_STOPPED; message = "交易权限或亏损保护变化，停止后续子单。"; }
-            else if (RBSpacingReady(GetTickCount64(), RBLastSendTick, g.interval_seconds))
+            else if (RBSpacingReady(GetTickCount64(), RBLastSendTick, RBGroupIntervalMilliseconds(g)))
             {
                 if (!RBSendNext(handle, g, message) && g.entry_state == RB_ENTRY_BUILDING)
                     g.entry_state = RB_ENTRY_STOPPED;

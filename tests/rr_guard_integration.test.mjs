@@ -146,12 +146,13 @@ check('ordinary RR retains symbol and magic isolation', () => {
     }
 });
 
-function handlerFixture({ guardAllows = true, initialized = true, rrEnabled = true, reverseBlocks = false } = {}) {
+function handlerFixture({ guardAllows = true, initialized = true, rrEnabled = true, reverseBlocks = false, batchActive = false } = {}) {
     const events = [];
     const context = vm.createContext({
         RRPanelInitSucceeded: initialized, RR_Enable: rrEnabled, RGEntryBlocked: !guardAllows,
         RGHistoryDirty: false, SymbolForTrading: 'XAUUSD', sets: { MagicNumber: 321, TrailingStopPoints: 10 },
-        LastRecalculationTime: 0, GetTickCount64: () => 2000,
+        LastRecalculationTime: 0, RRLastTimerManagement: 0, RRLastTimerView: 0,
+        now: 2000, GetTickCount64: () => context.now, batchActive, RBEntryActive: () => context.batchActive,
         RGManage: magic => { events.push(`guard:${magic}`); return guardAllows; },
         RMManage: () => events.push('manual'),
         RBManageGroups: () => events.push('group-exits'), RBManageEntry: () => events.push('batch-entry'), RCTradeLeave: () => events.push('entry-unlock'),
@@ -172,6 +173,52 @@ check('actual tick handler evaluates money guard before ordinary RR', () => {
 check('actual timer evaluates guard first and dispatches queued actual-deal sounds', () => {
     const f = handlerFixture(); f.context.OnTimer();
     assert.deepEqual(f.events.slice(0, 9), ['guard:321', 'manual', 'group-exits', 'batch-entry', 'entry-unlock', 'reverse', 'rr::321', 'flush-audio', 'views']);
+});
+check('timer setup requests 100 ms and initialization fails explicitly if unavailable', () => {
+    for (const allowed of [false, true]) {
+        const periods = [], errors = [];
+        const context = vm.createContext({ RRLastTimerManagement: 99, RRLastTimerView: 99,
+            EventSetMillisecondTimer: period => { periods.push(period); return allowed; },
+            Print: (...args) => errors.push(args), TRANSLATION_MESSAGE_ERROR_SETTING_TIMER: 'timer error', GetLastError: () => 7 });
+        install(context, entrySource, 'RRStartTimer');
+        assert.equal(context.RRStartTimer(), allowed);
+        assert.deepEqual(periods, [100]); assert.equal(errors.length, allowed ? 0 : 1);
+        assert.equal(context.RRLastTimerManagement, 0); assert.equal(context.RRLastTimerView, 0);
+    }
+    assert.match(extract(entrySource, 'OnInit').body, /if\s*\(!RRStartTimer\(\)\)\s*return INIT_FAILED;/);
+    assert.doesNotMatch(entrySource, /EventSetTimer\s*\(/);
+});
+check('active batch polls at 100 ms without ticks and always runs guard before entry', () => {
+    const f = handlerFixture({ batchActive: true });
+    for (const now of [2000, 2100, 2200]) {
+        f.context.now = now; f.events.length = 0; f.context.OnTimer();
+        assert.deepEqual(f.events.slice(0, 4), ['guard:321', 'manual', 'group-exits', 'batch-entry']);
+    }
+});
+check('idle timer retains one-second management cadence', () => {
+    const f = handlerFixture(); f.context.OnTimer(); f.events.length = 0;
+    for (let now = 2100; now < 3000; now += 100) { f.context.now = now; f.context.OnTimer(); }
+    assert.deepEqual(f.events, []);
+    f.context.now = 3000; f.context.OnTimer();
+    assert.equal(f.events.filter(event => event === 'batch-entry').length, 1);
+});
+check('a new active batch bypasses idle throttle on the next 100 ms event', () => {
+    const f = handlerFixture(); f.context.OnTimer(); f.events.length = 0;
+    f.context.batchActive = true; f.context.now = 2100; f.context.OnTimer();
+    assert.equal(f.events[0], 'guard:321'); assert.ok(f.events.includes('batch-entry'));
+});
+check('delayed timer performs one management pass without catch-up bursts', () => {
+    const f = handlerFixture({ batchActive: true }); f.context.OnTimer(); f.events.length = 0;
+    f.context.now = 9200; f.context.OnTimer();
+    assert.equal(f.events.filter(event => event === 'batch-entry').length, 1);
+    assert.equal(f.context.RRLastTimerManagement, 9200);
+});
+check('active batch view refresh is throttled without skipping risk or entry checks', () => {
+    const f = handlerFixture({ batchActive: true }); f.context.OnTimer(); f.events.length = 0;
+    for (let now = 2100; now <= 2500; now += 100) { f.context.now = now; f.context.OnTimer(); }
+    assert.equal(f.events.filter(event => event === 'guard:321').length, 5);
+    assert.equal(f.events.filter(event => event === 'batch-entry').length, 5);
+    assert.equal(f.events.filter(event => event === 'views').length, 1);
 });
 check('daily guard block prevents ordinary RR on both tick and timer', () => {
     for (const handler of ['OnTick', 'OnTimer']) {

@@ -231,6 +231,7 @@ bool RGExitPositionLocked(const int handle, RGExecutionState &s, const ulong tic
         || !MathIsValidNumber(minimum) || minimum <= 0 || !MathIsValidNumber(maximum) || maximum < minimum)
     { status = "持仓手数或券商手数规则无效，等待重试。"; return false; }
     if (!RGOrdinaryExitReady(rr_handle, s.identifier, volume, step, status)) return false;
+    if (!RMGuardExitReady(s.identifier, volume, step, status)) return false;
     if (s.pending != 0)
     {
         ulong resolved_order;

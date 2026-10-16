@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.190"
-string    Version = "3.14 - RR 1.50";
+#property version   "3.200"
+string    Version = "3.14 - RR 1.60";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -29,13 +29,16 @@ bool RGPositionExitLatched(const ulong identifier);
 #include "Position Sizer RR.mqh"
 #include "RRGuardInputs.mqh"
 #include "RRGuardSettings.mqh"
+bool RMGuardExitReady(const ulong identifier, const double volume, const double step, string &status);
 #include "RRGuardExecution.mqh"
 #include "RRDealAlerts.mqh"
 #include "RRGuard.mqh"
+#include "RRManualExecution.mqh"
 #include "RRTargetLines.mqh"
 #include "RRPanelRecovery.mqh"
 #include "Position Sizer.mqh";
 #include "Position Sizer Trading.mqh";
+#include "RRCentral.mqh"
 
 // Default values for settings:
 double EntryLevel = 0;
@@ -220,7 +223,8 @@ int OnInit()
     if (!RGInitSettings()) Print("[PS RR Guard] ", RGSettingsError);
     RGResetContext();
     RDInitAlerts();
-    SymbolForTrading = (TradeSymbol != "" ? TradeSymbol : _Symbol);
+    if (!RCLoadOption()) Print("[PS RR] 反向开仓选项读取失败，暂停开新仓。");
+    SymbolForTrading = _Symbol;
     if (DeinitializationReason != REASON_CHARTCHANGE) RRClearOrphanPanels();
     if (AutoDetectDarkMode) DetectedColorMode = DetectDarkMode();
     else DetectedColorMode = DarkMode;
@@ -292,10 +296,7 @@ int OnInit()
     if ((DeinitializationReason == REASON_CHARTCHANGE) && (OldSymbol != _Symbol))
     {
         ObjectsDeleteAll(0, ObjectPrefix, -1, OBJ_HLINE); // All lines should be deleted, so that they could be recreated at new sets. values.
-        if (SymbolChange == SYMBOL_CHART_CHANGE_EACH_OWN)
-        {
-            ExtDialog.SaveSettingsOnDisk(OldSymbol); // Save old symbol's settings.
-        }
+        ExtDialog.SaveSettingsOnDisk(OldSymbol); // Keep absolute prices specific to each symbol.
         ExtDialog.UpdateFileName(); // Update the filename.
 
         // Reset everything.
@@ -305,19 +306,12 @@ int OnInit()
         OutputSwapsCurrencyDailyLot = ""; OutputSwapsCurrencyDailyPS = ""; OutputSwapsCurrencyYearlyLot = ""; OutputSwapsCurrencyYearlyPS = "";
         WarnedAboutZeroUnitCost = 0;
 
-        if (SymbolChange == SYMBOL_CHART_CHANGE_HARD_RESET)
-        {
-            // Lines are treated as a part of the panel.
-            if (DefaultLinesSelected) LinesSelectedStatus = 1; // Flip lines to selected.
-            else LinesSelectedStatus = 2; // Flip lines to unselected.
-        }
     }
 
     bool is_InitControlsValues_required = false;
-    // Normal attempt to load settings fails (attempted in not chart change case and in chart case with 'each pair own settings' case
-    if ((((DeinitializationReason != REASON_CHARTCHANGE) || ((DeinitializationReason == REASON_CHARTCHANGE) && (OldSymbol != _Symbol) && (SymbolChange == SYMBOL_CHART_CHANGE_EACH_OWN))) && (!ExtDialog.LoadSettingsFromDisk())) 
-    // OR chart change with hard_reset configured and with symbol change.
-      || ((DeinitializationReason == REASON_CHARTCHANGE) && (SymbolChange == SYMBOL_CHART_CHANGE_HARD_RESET) && (OldSymbol != _Symbol)))
+    // Central panel keeps prices per symbol; common controls are reapplied below.
+    if ((DeinitializationReason != REASON_CHARTCHANGE || OldSymbol != _Symbol)
+        && !ExtDialog.LoadSettingsFromDisk())
     {
         sets.TradeDirection = DefaultTradeDirection;
         sets.EntryLevel = EntryLevel;
@@ -419,6 +413,8 @@ int OnInit()
         sets.MUBStartingBalance = DefaultMUBStartingBalance;
         if (DeinitializationReason == REASON_CHARTCHANGE) is_InitControlsValues_required = true;
     }
+    if (DeinitializationReason == REASON_CHARTCHANGE && OldSymbol != _Symbol && RCApplyCommon())
+        is_InitControlsValues_required = true;
     if (sets.TakeProfitsNumber < 1) // Read an old settings file with absent or bogus TakeProfitNumber parameter
     {
         sets.TakeProfitsNumber = 1; // At least one TP.
@@ -472,29 +468,11 @@ int OnInit()
         if (MinimizeMaximizeHotkey != "") DissectHotKeyCombination(MinimizeMaximizeHotkey, ShiftRequired_MinimizeMaximizeHotkey, CtrlRequired_MinimizeMaximizeHotkey, MainKey_MinimizeMaximizeHotkey);
         else MainKey_MinimizeMaximizeHotkey = 0;
     }
-    else if (OldSymbol != _Symbol)
-    {
-        if (SymbolChange == SYMBOL_CHART_CHANGE_HARD_RESET) // Reset Entry, SL, and all TPs if it was a symbol change and a hard reset is required.
-        {
-            sets.EntryLevel = 0;
-            sets.StopLossLevel = 0;
-            sets.StopLoss = 0;
-            sets.TakeProfitLevel = 0;
-            sets.TakeProfit = 0;
-            for (int i = 0; i < sets.TakeProfitsNumber; i++)
-            {
-                sets.TP[i] = 0;
-            }
-            sets.StopPriceLevel = 0;
-            Dont_Move_the_Panel_to_Default_Corner_X_Y = false;
-        }
-    }    
 
-    if (TradeSymbol != "") SymbolForTrading = TradeSymbol;
-    else SymbolForTrading = _Symbol;
+    SymbolForTrading = _Symbol;
 
-    // Avoid re-initialization on timeframe change and on symbol change with the 'keep panel' setting.
-    if ((DeinitializationReason != REASON_CHARTCHANGE) || ((DeinitializationReason == REASON_CHARTCHANGE) && (OldSymbol != _Symbol) && ((SymbolChange == SYMBOL_CHART_CHANGE_HARD_RESET) || (SymbolChange == SYMBOL_CHART_CHANGE_EACH_OWN))))
+    // Recalculate using the new chart symbol's digits, point and volume rules.
+    if (DeinitializationReason != REASON_CHARTCHANGE || OldSymbol != _Symbol)
     {
         Initialization();
         if (DeinitializationReason == REASON_CHARTCHANGE) // Do not run if it is not the symbol change because 'CPositionSizeCalculator::Create()' takes care of that in other cases.
@@ -523,7 +501,7 @@ int OnInit()
     }
 
     // Moved this down to let the additional TP controls get created before actually trying to hide them.
-    if ((DeinitializationReason == REASON_CHARTCHANGE) && (OldSymbol != _Symbol) && (SymbolChange == SYMBOL_CHART_CHANGE_EACH_OWN)) // Load the INI file if it was a symbol change and a each symbol has its own settings.
+    if (DeinitializationReason == REASON_CHARTCHANGE && OldSymbol != _Symbol) // Load the INI file if it was a symbol change and a each symbol has its own settings.
     {
         ExtDialog.IniFileLoad();
     }
@@ -653,7 +631,7 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] RR 1.50 面板初始化完成。请在“亏损保护”页填写金额并保存，0 金额表示关闭。");
+    Print("[PS RR] RR 1.60 面板初始化完成。请在“亏损保护”页填写金额并保存，0 金额表示关闭。");
     return INIT_SUCCEEDED;
 }
 
@@ -662,6 +640,8 @@ void OnDeinit(const int reason)
     RRDeleteTargetLines();
     RGDeleteStatus();
     RRShutdown();
+    RCCancelReverse();
+    if (RRPanelInitSucceeded && reason == REASON_CHARTCHANGE) RCCaptureCommon();
     DeinitializationReason = reason; // Remember reason to avoid recreating the panel in the OnInit() if it is not deleted here.
     
     EventKillTimer();
@@ -734,7 +714,10 @@ void OnDeinit(const int reason)
 void OnTick()
 {
     if (!RRPanelInitSucceeded) return;
-    if (RGManage(sets.MagicNumber)) RRManage(SymbolForTrading, sets.MagicNumber);
+    bool normal_exits_allowed = RGManage(sets.MagicNumber);
+    RMManage();
+    RCManageReverse();
+    if (normal_exits_allowed && !RGEntryBlocked) RRManage("", sets.MagicNumber);
     ExtDialog.RefreshValues();
     RRRefreshViews();
 
@@ -1158,7 +1141,10 @@ void OnTimer()
     if (!RRPanelInitSucceeded) return;
     // RR exits also run when ticks on the chart are sparse; do not put this
     // behind the panel's refresh throttle.
-    if (RGManage(sets.MagicNumber)) RRManage(SymbolForTrading, sets.MagicNumber);
+    bool normal_exits_allowed = RGManage(sets.MagicNumber);
+    RMManage();
+    RCManageReverse();
+    if (normal_exits_allowed && !RGEntryBlocked) RRManage("", sets.MagicNumber);
     RDFlushAlerts(sets.MagicNumber);
     RRRefreshViews();
     /**
@@ -1175,6 +1161,7 @@ void OnTimer()
 void RRRefreshViews(const bool force = false)
 {
     if (!RRPanelInitSucceeded || CheckPointer(ExtDialog) != POINTER_DYNAMIC) return;
+    ExtDialog.RefreshTradeControlStatus();
     ExtDialog.RefreshGuardLiveStatus();
     RGRefreshStatus();
     ExtDialog.RefreshRRLiveStatus();

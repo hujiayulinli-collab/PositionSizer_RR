@@ -67,6 +67,7 @@ function managerFixture({ race = false, latched = [], existingJournal = false, f
             events.push(`latch:${result}`);
             return result;
         },
+        RMPositionExitActive: () => false,
         FileOpen: name => {
             if (failOpen) return -1;
             if (race && !journals.has(name)) {
@@ -145,13 +146,15 @@ check('ordinary RR retains symbol and magic isolation', () => {
     }
 });
 
-function handlerFixture({ guardAllows = true, initialized = true, rrEnabled = true } = {}) {
+function handlerFixture({ guardAllows = true, initialized = true, rrEnabled = true, reverseBlocks = false } = {}) {
     const events = [];
     const context = vm.createContext({
         RRPanelInitSucceeded: initialized, RR_Enable: rrEnabled, RGEntryBlocked: !guardAllows,
         RGHistoryDirty: false, SymbolForTrading: 'XAUUSD', sets: { MagicNumber: 321, TrailingStopPoints: 10 },
         LastRecalculationTime: 0, GetTickCount64: () => 2000,
         RGManage: magic => { events.push(`guard:${magic}`); return guardAllows; },
+        RMManage: () => events.push('manual'),
+        RCManageReverse: () => { events.push('reverse'); if (reverseBlocks) context.RGEntryBlocked = true; },
         RRManage: (symbol, magic) => events.push(`rr:${symbol}:${magic}`),
         ExtDialog: { RefreshValues: () => events.push('refresh'), CheckAndRestoreLines: () => events.push('restore-lines') },
         RRRefreshViews: () => events.push('views'), RDFlushAlerts: () => events.push('flush-audio'),
@@ -163,16 +166,17 @@ function handlerFixture({ guardAllows = true, initialized = true, rrEnabled = tr
 }
 check('actual tick handler evaluates money guard before ordinary RR', () => {
     const f = handlerFixture(); f.context.OnTick();
-    assert.deepEqual(f.events.slice(0, 2), ['guard:321', 'rr:XAUUSD:321']);
+    assert.deepEqual(f.events.slice(0, 4), ['guard:321', 'manual', 'reverse', 'rr::321']);
 });
 check('actual timer evaluates guard first and dispatches queued actual-deal sounds', () => {
     const f = handlerFixture(); f.context.OnTimer();
-    assert.deepEqual(f.events.slice(0, 4), ['guard:321', 'rr:XAUUSD:321', 'flush-audio', 'views']);
+    assert.deepEqual(f.events.slice(0, 6), ['guard:321', 'manual', 'reverse', 'rr::321', 'flush-audio', 'views']);
 });
 check('daily guard block prevents ordinary RR on both tick and timer', () => {
     for (const handler of ['OnTick', 'OnTimer']) {
         const f = handlerFixture({ guardAllows: false }); f.context[handler]();
         assert.equal(f.events[0], 'guard:321'); assert.ok(!f.events.some(event => event.startsWith('rr:')));
+        assert.deepEqual(f.events.slice(0, 3), ['guard:321', 'manual', 'reverse']);
     }
 });
 check('money guard still runs with RR disabled, and blocks legacy trailing if locked', () => {
@@ -191,6 +195,17 @@ check('actual OnTrade invalidates realized history cache before UI refresh', () 
     const f = handlerFixture(); f.context.OnTrade();
     assert.equal(f.context.RGHistoryDirty, true); assert.deepEqual(f.events, ['refresh', 'redraw']);
 });
+check('manual, reverse and all-symbol RR management stay ahead of the panel timer throttle', () => {
+    const f = handlerFixture(); f.context.LastRecalculationTime = 2000; f.context.OnTimer();
+    assert.deepEqual(f.events, ['guard:321', 'manual', 'reverse', 'rr::321', 'flush-audio', 'views']);
+});
+check('a new money block detected during reverse preflight suppresses ordinary RR in the same event', () => {
+    for (const handler of ['OnTick', 'OnTimer']) {
+        const f = handlerFixture({ reverseBlocks: true }); f.context[handler]();
+        assert.deepEqual(f.events.slice(0, 3), ['guard:321', 'manual', 'reverse']);
+        assert.ok(!f.events.some(event => event.startsWith('rr:')));
+    }
+});
 
 check('actual entry preflight checks money guard even when RR is disabled', () => {
     for (const allowed of [false, true]) {
@@ -202,12 +217,23 @@ check('actual entry preflight checks money guard even when RR is disabled', () =
         assert.deepEqual(events, ['entry-guard:321']);
     }
 });
-check('Trade always starts with guarded entry preflight', () => {
-    const { body } = extract(tradingSource, 'Trade');
+check('Trade core always starts with guarded entry preflight', () => {
+    const { body } = extract(tradingSource, 'RCTradeCore');
     assert.match(body.trimStart(), /^if\s*\(!RRBeforeTrade\(\)\)\s*return;/);
 });
+check('Trade wrapper reaches the guarded core only with the entry lock and releases it afterwards', () => {
+    for (const allowed of [false, true]) {
+        const events = [];
+        const context = vm.createContext({
+            RCTradeEnter: () => { events.push('enter'); return allowed; },
+            RCTradeCore: () => events.push('guarded-core'), RCTradeLeave: () => events.push('leave'),
+        });
+        install(context, tradingSource, 'Trade'); context.Trade();
+        assert.deepEqual(events, allowed ? ['enter', 'guarded-core', 'leave'] : ['enter']);
+    }
+});
 check('both pending and market sends recheck daily guard after their confirmation dialog', () => {
-    const { body } = extract(tradingSource, 'Trade');
+    const { body } = extract(tradingSource, 'RCTradeCore');
     const sendSites = [...body.matchAll(/if\s*\(!Trade\.(OrderOpen|PositionOpen)\(/g)];
     assert.equal(sendSites.length, 2);
     for (const site of sendSites) {
@@ -221,8 +247,8 @@ check('both pending and market sends recheck daily guard after their confirmatio
     }
 });
 check('post-entry ordinary management is conditional on a fresh guard result', () => {
-    const { body } = extract(tradingSource, 'Trade');
-    assert.match(body, /if\s*\(AtLeastOneOrderExecuted\s*&&\s*RGManage\(sets\.MagicNumber,\s*true\)\)\s*RRManage\(/);
+    const { body } = extract(tradingSource, 'RCTradeCore');
+    assert.match(body, /if\s*\(AtLeastOneOrderExecuted\s*&&\s*RGManage\(sets\.MagicNumber,\s*true\)\)\s*RRManage\("",\s*sets\.MagicNumber\)/);
 });
 
 // This fixture substitutes account settings, accounting, durable storage and

@@ -106,6 +106,7 @@ const context = vm.createContext({
         if (env.failOpen || env.locked.has(filename)) return -1;
         const handle = ++env.handle;
         env.handles.set(handle, { filename, flags }); env.locked.add(filename);
+        if (env.onOpen) env.onOpen();
         return handle;
     },
     FileClose: handle => {
@@ -132,10 +133,14 @@ const context = vm.createContext({
         return env.hasHistory;
     },
     TerminalInfoInteger: () => env.connected,
-    SymbolInfoDouble: (_symbol, key) => ({ SYMBOL_VOLUME_STEP: env.step, SYMBOL_VOLUME_MIN: env.minimum,
-        SYMBOL_TRADE_TICK_SIZE: env.tickSize })[key],
-    SymbolInfoInteger: () => env.digits,
-    SymbolInfoTick: (_symbol, tick) => { Object.assign(tick, { bid: env.bid, ask: env.ask }); return env.hasQuote; },
+    SymbolInfoDouble: (symbol, key) => {
+        env.symbolReads.push(symbol); const rules = env.symbolRules[symbol] ?? env;
+        return ({ SYMBOL_VOLUME_STEP: rules.step, SYMBOL_VOLUME_MIN: rules.minimum, SYMBOL_TRADE_TICK_SIZE: rules.tickSize })[key];
+    },
+    SymbolInfoInteger: symbol => (env.symbolRules[symbol] ?? env).digits,
+    SymbolInfoTick: (symbol, tick) => { const rules = env.symbolRules[symbol] ?? env;
+        Object.assign(tick, { bid: rules.bid, ask: rules.ask }); return rules.hasQuote; },
+    RGPositionExitLatched: id => env.riskExits.has(id), RMPositionExitActive: id => env.manualExits.has(id),
     PrintFormat: (...args) => env.notices.push(args),
     OrderSend: () => { throw new Error('Editing must never send a trade request'); },
 });
@@ -150,7 +155,7 @@ function reset(s = state(), overrides = {}) {
         locked: new Set(), handles: new Map(), handle: 0, opens: [], closed: [], saved: [], saveAttempts: 0,
         failOpen: false, failSave: false, openingOrder: 100, inVolume: 1, mixed: false, hasHistory: true,
         step: 0.01, minimum: 0.01, tickSize: 0.01, digits: 2, connected: true, hasQuote: true,
-        bid: 119, ask: 119.2, notices: [], ...overrides };
+        bid: 119, ask: 119.2, notices: [], symbolRules: {}, symbolReads: [], riskExits: new Set(), manualExits: new Set(), ...overrides };
 }
 function read(id = 42, symbol = 'TEST', magic = 123) {
     const s = {}, ticket = { value: 0 }, error = { value: 'stale' };
@@ -402,6 +407,50 @@ check('near-100 full-exit stage still owes the final lot step and cannot be edit
     reset(state({ stage: 2, target_percent: [50, 49.99999995, ...Array(18).fill(0)] }),
         { positions: [position({ volume: 0.01 })], bid: 145, ask: 145.2 });
     assert.equal(apply(plan([[2, 50, 1], [5, 49.99999995]])).ok, false);
+});
+
+check('wildcard read finds managed positions on another symbol without adopting other magic', () => {
+    reset(state(), { positions: [position({ symbol: 'EURUSD' })] });
+    assert.equal(read(42, '').ok, true); assert.equal(read(42, 'TEST').ok, false); assert.equal(read(42, '', 999).ok, false);
+    assert.equal(env.saved.length, 0);
+});
+check('wildcard next position enumerates readable journals across symbols in identifier order', () => {
+    reset(); env.positions.push(position({ id: 77, ticket: 777, symbol: 'EURUSD' }), position({ id: 66, ticket: 666, symbol: 'GBPUSD', magic: 999 }));
+    env.files['journal:77'] = { valid: true, state: state({ identifier: 77 }) };
+    env.files['journal:66'] = { valid: true, state: state({ identifier: 66, magic: 999 }) };
+    assert.equal(context.RRNextManagedPosition('', 123, 0), 42);
+    assert.equal(context.RRNextManagedPosition('', 123, 42), 77);
+    assert.equal(context.RRNextManagedPosition('TEST', 123, 42), 0);
+});
+check('wildcard plan apply resolves actual selected symbol and preserves frozen and execution fields', () => {
+    reset(state(), { positions: [position({ symbol: 'EURUSD' })] });
+    const before = copy(env.files['journal:42'].state);
+    assert.equal(apply(undefined, { symbol: '' }).ok, true);
+    assert.ok(env.symbolReads.length > 0 && env.symbolReads.every(s => s === 'EURUSD'));
+    const after = env.saved[0];
+    for (const key of ['identifier', 'magic', 'opening_order', 'direction', 'entry', 'risk', 'initial_volume',
+        'offset_points', 'stage', 'be_done', 'blocked', 'sequence', 'pending', 'pending_order', 'before_volume',
+        'last_request', 'last_stop_request', 'be_requested']) assert.deepEqual(after[key], before[key], key);
+});
+check('off-chart plan edit obeys that position symbol minimum rather than current chart rules', () => {
+    reset(state(), { positions: [position({ symbol: 'COARSE' })], symbolRules: {
+        COARSE: { step: 0.1, minimum: 0.6, tickSize: 0.1, digits: 1, bid: 119, ask: 119.2, hasQuote: true },
+    } });
+    assert.equal(apply(plan([[2.5, 50, 1], [6, 50]]), { symbol: '' }).ok, false);
+    assert.ok(env.symbolReads.every(s => s === 'COARSE'));
+});
+check('selected managed position can use its actual magic independently from the panel new-entry magic', () => {
+    reset(state({ magic: 999 }), { positions: [position({ symbol: 'EURUSD', magic: 999 })] });
+    assert.equal(apply(undefined, { symbol: '', magic: 999 }).ok, true);
+});
+check('risk and manual exits prevent plan edits before opening a writable journal', () => {
+    for (const field of ['riskExits', 'manualExits']) {
+        reset(); env[field].add(42); assert.equal(apply().ok, false); assert.equal(env.opens.length, 0);
+    }
+});
+check('manual exit intent arising during journal lock acquisition prevents plan writes', () => {
+    reset(); env.onOpen = () => env.manualExits.add(42);
+    assert.equal(apply().ok, false); assert.equal(env.saveAttempts, 0); assert.equal(env.handles.size, 0);
 });
 
 process.stdout.write(`\n${passed} live-plan tests passed against production APIs.\n`);

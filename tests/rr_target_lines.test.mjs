@@ -31,10 +31,13 @@ function fixture() {
         SYMBOL_TRADE_TICK_SIZE: 1, SYMBOL_DIGITS: 2, POSITION_SYMBOL: 3, POSITION_MAGIC: 4,
         POSITION_IDENTIFIER: 5, POSITION_TP: 6, time: 1000, rows: [], positions: [], objects,
         ChartID: () => 1, GetTickCount64: () => ctx.time,
-        SymbolInfoDouble: () => 0.01, SymbolInfoInteger: () => 2,
+        SymbolInfoDouble: symbol => (ctx.rules[symbol] ?? ctx.rules.XAUUSD).tickSize,
+        SymbolInfoInteger: symbol => (ctx.rules[symbol] ?? ctx.rules.XAUUSD).digits,
+        rules: { XAUUSD: { tickSize: 0.01, digits: 2 }, EURUSD: { tickSize: 0.00001, digits: 5 } },
         DoubleToString: (n, digits) => n.toFixed(digits), IntegerToString: String,
         StringLen: s => s.length, StringSubstr: (s, from, length) => length === undefined ? s.slice(from) : s.substr(from, length),
         StringFind: (s, part) => s.indexOf(part), MathAbs: Math.abs, MathCeil: Math.ceil, MathFloor: Math.floor,
+        MathIsValidNumber: Number.isFinite,
         MathMax: Math.max, MathMin: Math.min, ArraySize: a => a.length,
         NormalizeDouble: (v, digits) => Number(v.toFixed(digits)), ArrayResize: (a, n) => { a.length = n; },
         RRFileName: id => id, FileIsExist: id => ctx.positions.some(p => p.id === id && p.journal),
@@ -46,7 +49,7 @@ function fixture() {
         PositionSelectByTicket: ticket => !!(ctx.selected = ctx.positions.find(p => p.ticket === ticket)),
         RRReadManagedPosition: (symbol, magic, id, state) => {
             const p = ctx.positions.find(p => p.id === id);
-            if (!p || p.busy) return false;
+            if (!p || p.busy || p.magic !== magic || p.state.magic !== magic) return false;
             Object.assign(state, structuredClone(p.state)); return true;
         },
         RRStatePlan: (state, target) => Object.assign(target, structuredClone(state.plan)),
@@ -68,7 +71,7 @@ function fixture() {
     ctx.refresh = () => { ctx.rows = []; ctx.RRRefreshTargetLines('XAUUSD', 123, 4336.71, 4349.42, -1, true); };
     ctx.position = (id = 42) => ({
         id, ticket: id + 100, journal: true, magic: 123, symbol: 'XAUUSD', tp: 4303.34,
-        state: { version: 2, direction: -1, entry: 4341.74, risk: 4349.42 - 4341.74, final_r: 5, stage: 0, blocked: 0, plan: structuredClone(plan) },
+        state: { version: 2, magic: 123, direction: -1, entry: 4341.74, risk: 4349.42 - 4341.74, final_r: 5, stage: 0, blocked: 0, plan: structuredClone(plan) },
     });
     return ctx;
 }
@@ -108,7 +111,7 @@ check('unmanaged positions do not produce adoption annotations', () => {
     const s = fixture(); const p = s.position(); p.journal = false; s.positions.push(p); s.refresh();
     assert.ok(s.rows.every(r => r.key.includes('Preview')));
 });
-check('wrong symbol and magic are excluded', () => {
+check('wrong symbol and mismatching journal Magic are excluded', () => {
     const s = fixture(); const a = s.position(), b = s.position(43); a.magic = 999; b.symbol = 'EURUSD';
     s.positions.push(a, b); s.refresh(); assert.ok(s.rows.every(r => r.key.includes('Preview')));
 });
@@ -174,5 +177,40 @@ check('BE-only runner labels show no invented forced close', () => {
     const s = fixture(); const p = s.position(); p.state.plan = { count: 1, targets: [{ multiple: 2, percent: 0, move_be: 1 }] }; p.tp = 0;
     s.positions.push(p); s.refresh();
     assert.match(s.rows[0].caption, /平 0% \+ BE.*保留 100%.*无全平TP/);
+});
+check('global manager wildcard never puts all-symbol prices on a single chart', () => {
+    const s = fixture(); s.positions.push(s.position()); s.refresh();
+    s.rows = []; s.RRRefreshTargetLines('', 123, 4336.71, 4349.42, -1, false);
+    assert.equal(s.rows.length, 0); assert.equal(s.objects.size, 0);
+});
+check('changing to another chart symbol prunes old annotations even during the refresh throttle', () => {
+    const s = fixture(); s.positions.push(s.position()); s.refresh(); s.rows = [];
+    s._Symbol = 'EURUSD'; s.RRRefreshTargetLines('XAUUSD', 123, 4336.71, 4349.42, -1, false);
+    assert.equal(s.rows.length, 0); assert.equal(s.objects.size, 0);
+});
+check('current chart draws only its matching positions using its own tick and digit rules', () => {
+    const s = fixture(); const gold = s.position(42), eur = s.position(43);
+    eur.symbol = 'EURUSD'; eur.tp = 1.09823;
+    Object.assign(eur.state, { direction: 1, entry: 1.08323, risk: 0.003 });
+    s.positions.push(gold, eur); s._Symbol = 'EURUSD';
+    s.RRRefreshTargetLines('EURUSD', 123, 0, 0, 1, true);
+    assert.deepEqual(s.rows.map(r => r.price), [1.08923, 1.09823]);
+    assert.ok(s.rows.every(r => r.key.includes('_43_'))); assert.match(s.rows[0].caption, /1\.08923/);
+});
+check('invalid current symbol price step removes stale targets instead of drawing invalid prices', () => {
+    const s = fixture(); s.positions.push(s.position()); s.refresh(); s.rows = [];
+    s.rules.XAUUSD.tickSize = 0; s.RRRefreshTargetLines('XAUUSD', 123, 100, 90, 1, true);
+    assert.equal(s.rows.length, 0); assert.equal(s.objects.size, 0);
+});
+check('valid old-Magic journals keep their current-chart annotations after entry Magic changes', () => {
+    const s = fixture(); const p = s.position(); p.magic = 999; p.state.magic = 999;
+    s.positions.push(p); s.refresh();
+    assert.equal(s.rows.length, 2); assert.ok(s.rows.every(r => r.key.includes('_42_')));
+    assert.deepEqual(s.rows.map(r => r.price), [4326.38, 4303.34]);
+});
+check('manual and unrelated positions without journals are never adopted into target annotations', () => {
+    const s = fixture(); const a = s.position(42), b = s.position(43);
+    a.magic = 0; a.journal = false; b.magic = 999; b.journal = false; s.positions.push(a, b); s.refresh();
+    assert.ok(s.rows.every(r => r.key.includes('Preview')));
 });
 console.log(`${count} chart annotations checks passed`);

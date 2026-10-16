@@ -14,13 +14,14 @@ double RRNewOrderTakeProfit(const double preview_tp)
     return preview_tp;
 }
 
-bool RRNettingSlotAvailable()
+bool RRNettingSlotAvailable(const bool allow_reverse = false)
 {
     if ((!RR_Enable) || (AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)) return true;
     for (int i = PositionsTotal() - 1; i >= 0; i--)
     {
         if ((PositionGetTicket(i) != 0) && (PositionGetString(POSITION_SYMBOL) == SymbolForTrading))
         {
+            if (allow_reverse && RCCloseOpposite && RCSelectedOpposite()) continue;
             Alert("RR：当前品种已有持仓。净额账户在 RR 模式下不允许加仓或反向开仓。");
             return false;
         }
@@ -45,7 +46,7 @@ bool RRBeforeTrade()
     ExtDialog.RefreshValues();
     if (SymbolForTrading != _Symbol)
     {
-        Alert("RR：请将 EA 加载到要交易的品种图表。TradeSymbol 必须留空，或与当前图表品种一致。");
+        Alert("RR：品种切换尚未完成，请等待主页显示新交易品种后再下单。");
         return false;
     }
     if (sets.TakeProfitsNumber != 1)
@@ -81,7 +82,7 @@ bool RRBeforeTrade()
         Alert("RR：", plan_error);
         return false;
     }
-    return RRNettingSlotAvailable();
+    return RRNettingSlotAvailable(true);
 }
 
 // Validate the final send volume, after the original fuses and volume limits.
@@ -103,6 +104,13 @@ bool RRCanSplitVolume(const double volume)
 //| Main trading function.                                           |
 //+------------------------------------------------------------------+
 void Trade()
+{
+    if (!RCTradeEnter()) return;
+    RCTradeCore();
+    RCTradeLeave();
+}
+
+void RCTradeCore()
 {
     if (!RRBeforeTrade()) return;
     CTrade *Trade;
@@ -135,6 +143,7 @@ void Trade()
         return;
     }
 
+    bool closing_opposite_first = RCPreparingReverse();
     double TP[], TPShare[]; // Mimics sets.TP[] and sets.TPShare[], but always includes the main TP too.
 
     ArrayResize(TP, sets.TakeProfitsNumber);
@@ -239,8 +248,13 @@ void Trade()
     }
 
     double PositionSize = OutputPositionSize;
+    if (RCResuming && PositionSize > RCQueuedVolume)
+    {
+        PositionSize = RCQueuedVolume;
+        PositionSizeToArray(PositionSize);
+    }
 
-    if (ShowMaxParametersOnTrading)
+    if (ShowMaxParametersOnTrading && !closing_opposite_first)
     {
         if ((sets.MaxNumberOfTradesTotal > 0) || (sets.MaxNumberOfTradesPerSymbol > 0))
         {
@@ -510,7 +524,7 @@ void Trade()
             }
         }
 
-        double new_ps = MaxVolumeCheck(PositionSize);
+        double new_ps = closing_opposite_first ? PositionSize : MaxVolumeCheck(PositionSize);
         if (new_ps < 0) return; // Doesn't conform restrictions and cannot be reduced.
         if (PositionSize != new_ps)
         {
@@ -518,11 +532,13 @@ void Trade()
             PositionSizeToArray(PositionSize);
         }
        
-        if ((sets.AskForConfirmation) && (!CheckConfirmation(ot, PositionSize, sets.StopLossLevel, RRNewOrderTakeProfit(sets.TakeProfitLevel), expiry)))
+        if ((!RCResuming) && (sets.AskForConfirmation) && (!CheckConfirmation(ot, PositionSize, sets.StopLossLevel, RRNewOrderTakeProfit(sets.TakeProfitLevel), expiry)))
         {
             delete Trade;
             return;
         }
+        if (RCQueueReverse(PositionSize)) { delete Trade; return; }
+        if (closing_opposite_first) { delete Trade; Alert("原反向仓刚已变化，请重新检查并点击交易。"); return; }
 
         if (sets.DoNotApplyStopLoss)
         {
@@ -582,7 +598,7 @@ void Trade()
                 }
                 // Recheck after the confirmation dialog: another EA may have
                 // opened a netting position while the dialog was visible.
-                if ((!RGCanOpen(sets.MagicNumber)) || (!RRCanSplitVolume(sub_position_size)) || (!RRNettingSlotAvailable()))
+                if ((!RGCanOpen(sets.MagicNumber)) || (!RRCanSplitVolume(sub_position_size)) || (!RRNettingSlotAvailable()) || (!RCEntryClear()) || (!RCReserveEntryVolume(sub_position_size)))
                 {
                     isOrderPlacementFailing = true;
                     break;
@@ -625,7 +641,7 @@ void Trade()
             }
         }
 
-        double new_ps = MaxVolumeCheck(PositionSize);
+        double new_ps = closing_opposite_first ? PositionSize : MaxVolumeCheck(PositionSize);
         if (new_ps < 0) return; // Doesn't conform restrictions and cannot be reduced.
         if (PositionSize != new_ps)
         {
@@ -633,11 +649,13 @@ void Trade()
             PositionSizeToArray(PositionSize);
         }
         
-        if ((sets.AskForConfirmation) && (!CheckConfirmation(ot, PositionSize, sets.StopLossLevel, RRNewOrderTakeProfit(sets.TakeProfitLevel))))
+        if ((!RCResuming) && (sets.AskForConfirmation) && (!CheckConfirmation(ot, PositionSize, sets.StopLossLevel, RRNewOrderTakeProfit(sets.TakeProfitLevel))))
         {
             delete Trade;
             return;
         }
+        if (RCQueueReverse(PositionSize)) { delete Trade; return; }
+        if (closing_opposite_first) { delete Trade; Alert("原反向仓刚已变化，请重新检查并点击交易。"); return; }
 
         // Use ArrayPositionSize that has already been calculated in CalculateRiskAndPositionSize().
         // Check if they are OK.
@@ -707,7 +725,7 @@ void Trade()
                     position_size = 0; // End the cycle;
                 }    
             
-                if ((!RGCanOpen(sets.MagicNumber)) || (!RRCanSplitVolume(sub_position_size)) || (!RRNettingSlotAvailable()))
+                if ((!RGCanOpen(sets.MagicNumber)) || (!RRCanSplitVolume(sub_position_size)) || (!RRNettingSlotAvailable()) || (!RCEntryClear()) || (!RCReserveEntryVolume(sub_position_size)))
                 {
                     isOrderPlacementFailing = true;
                     break;
@@ -777,7 +795,7 @@ void Trade()
         
     // Capture confirmed fills immediately, including SL/TP applied after a
     // market-execution order; pending orders are captured when they fill.
-    if (AtLeastOneOrderExecuted && RGManage(sets.MagicNumber, true)) RRManage(SymbolForTrading, sets.MagicNumber);
+    if (AtLeastOneOrderExecuted && RGManage(sets.MagicNumber, true)) RRManage("", sets.MagicNumber);
     // The panel's trade-sound switch controls every successful fill. Retain
     // only the original failure notification; no success fallback bypasses it.
     if (!DisableTradingSounds && (isOrderPlacementFailing || !AtLeastOneOrderExecuted))

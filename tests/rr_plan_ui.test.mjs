@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const source = readFileSync(new URL('../mt5/RRPlanPanel.mqh', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../mt5/RRPlanPanel.mqh', import.meta.url), 'utf8')
+    + '\n' + readFileSync(new URL('../mt5/RRTradePanel.mqh', import.meta.url), 'utf8');
 function extract(name) {
     const match = new RegExp(`(?:void|bool) CPositionSizeCalculator::${name}\\(([^)]*)\\)\\s*\\{`).exec(source);
     assert.ok(match, `Production function ${name} exists`);
@@ -18,11 +19,12 @@ function extract(name) {
     let body = source.slice(start, end - 1)
         .replace(/\bRRPlan (\w+);/g, 'let $1 = makePlan();')
         .replace(/\bRRState (\w+);/g, 'let $1 = {};')
-        .replace(/\b(?:double|string|int|bool|ulong|uint)\s+(\w+)\s*;/g, 'let $1;')
-        .replace(/\b(?:double|string|int|bool|ulong|uint)\s+(?=\w+\s*=)/g, 'let ')
-        .replace(/\(int\)/g, '')
+        .replace(/\b(?:double|string|int|bool|ulong|uint|long)\s+(\w+)\s*;/g, 'let $1;')
+        .replace(/\b(?:double|string|int|bool|ulong|uint|long)\s+(?=\w+\s*=)/g, 'let ')
+        .replace(/\((?:int|ulong|long)\)/g, '')
         .replace(/RRReadManagedPosition\(([^;\n]+), (state|current), ticket, error\)/g, 'RRReadManagedPosition($1, $2)')
         .replace('RRPlanParseNumber(m_EdtRRMultiple[row].Text(), multiple)', '((multiple = parseNumber(m_EdtRRMultiple[row].Text())) !== null)')
+        .replace('RRPlanParseNumber(m_EdtRRClosePercent.Text(), percent)', '((percent = parseNumber(m_EdtRRClosePercent.Text())) !== null)')
         .replace('RRPlanParseNumber(percentage, summary.targets[index].percent)', 'parseInto(percentage, summary.targets[index], "percent")')
         .replace(/m_rr_state = state;/g, 'm_rr_state = structuredClone(state);')
         .replace(/m_rr_loaded_plan = plan;/g, 'm_rr_loaded_plan = structuredClone(plan);')
@@ -44,6 +46,17 @@ class Control {
     Disable() { this.enabled = false; }
     ReadOnly(value) { this.readonly = value; }
     Color(value) { this.color = value; }
+    FontSize(value) { this.fontSize = value; }
+    TextAlign(value) { this.align = value; }
+}
+class Combo extends Control {
+    constructor() { super(); this.items = []; this.value = 0; }
+    ItemsClear() { this.items = []; this.value = 0; }
+    AddItem(text, value) { this.items.push({ text, value }); }
+    SelectByValue(value) { this.value = value; return true; }
+    Value() { return this.value; }
+    Expanded() { return this.expanded || false; }
+    Select(index) { if (arguments.length) this.value = this.items[index]?.value || 0; return this.items.find(i => i.value === this.value)?.text || ''; }
 }
 function parseNumber(text) {
     text = text.trim();
@@ -58,6 +71,7 @@ function fixture(count = 2) {
     const s = {
         RRActivePlan: active, RR_MAX_TARGETS: 20, RR_Enable: true,
         m_rr_count: 0, m_rr_page: 0, m_rr_visible: true, m_minimized: false,
+        m_rr_has_plan: true, m_rr_position_magic: 123, m_rr_position_symbol: 'AUDUSD', m_rr_position_choices: '',
         m_controls_ready: true, m_rr_position_id: 0, m_rr_last_refresh: 0, m_rr_stale: false, m_rr_readonly: false, m_rr_dirty: false,
         m_rr_expected_checksum: 0, m_rr_expected_stage: 0, m_rr_live_stage: 0, m_rr_state: {}, m_rr_loaded_plan: makePlan(),
         m_rr_multiple: Array(20).fill(''), m_rr_percent: Array(20).fill(''), m_rr_be: Array(20).fill(false),
@@ -70,16 +84,27 @@ function fixture(count = 2) {
         canEdit: true, applyAllowed: true, canEditCalls: 0, applyCalls: 0, updates: [],
         SymbolForTrading: 'AUDUSD', sets: { MagicNumber: 123, TPMultiplier: 2, EntryLevel: 100, StopLossLevel: 90 },
         SYMBOL_DIGITS: 'digits', SYMBOL_TRADE_TICK_SIZE: 'tick', POSITION_VOLUME: 'volume', POSITION_TP: 'tp',
+        POSITION_IDENTIFIER: 'identifier', POSITION_SYMBOL: 'symbol', POSITION_MAGIC: 'magic', POSITION_TYPE: 'type', POSITION_TYPE_BUY: 0,
         SymbolInfoInteger: () => 2, SymbolInfoDouble: () => 0.01, MathAbs: Math.abs, MathMax: Math.max,
         RRTargetPrice: (direction, entry, risk, multiple) => Math.round((entry + direction * risk * multiple) * 100) / 100,
         clrDimGray: 'grey', clrDarkSlateGray: 'normal', clrFireBrick: 'error', tick: 1000, GetTickCount64: () => s.tick,
         positions: new Map(), readable: true, positionApplyCalls: [], positionApplyAllowed: true,
+        first_column_start: 7, element_height: 20, m_DPIScale: 1, MathRound: Math.round, ALIGN_RIGHT: 1, RRTabList: [],
     };
     for (const name of ['m_LblRRNumber', 'm_LblRRPrice', 'm_EdtRRMultiple', 'm_EdtRRPercent', 'm_ChkRRBreakEven', 'm_BtnRRDelete'])
         s[name] = Array.from({ length: 5 }, () => new Control());
-    for (const name of ['m_LblRRMode', 'm_LblRRInfo', 'm_LblRRBEInfo', 'm_LblRRPositionInfo', 'm_BtnRRSave', 'm_BtnRRReset']) s[name] = new Control();
+    for (const name of ['m_LblRRMode', 'm_LblRRInfo', 'm_LblRRBEInfo', 'm_LblRRPositionInfo', 'm_BtnRRSave', 'm_BtnRRReset', 'm_BtnRRManualClose', 'm_EdtRRClosePercent',
+        'm_BtnRRNewPlan', 'm_BtnRRPosition', 'm_LblRRManualInfo', 'm_LblRRHeadingR', 'm_LblRRHeadingPercent', 'm_LblRRHeadingBE', 'm_LblRRStatus', 'm_LblRRStatus2']) s[name] = new Control();
+    for (const type of ['Label', 'Button', 'Edit', 'CheckBox', 'ComboBox']) s[type + 'Create'] = (list, control, x1, y1, x2, y2, name, text) => {
+        control.rect = [x1, y1, x2, y2]; control.name = name; if (text !== undefined) control.Text(text); list.push(control); return true;
+    };
+    s.m_CmbRRPosition = new Combo(); s.m_CmbRRClosePercent = new Combo();
+    s.PositionsTotal = () => s.positions.size;
+    s.PositionGetTicket = index => { s.selected = [...s.positions.values()][index]; return s.selected?.ticket || 0; };
+    s.PositionGetInteger = prop => s.selected[prop]; s.PositionGetString = prop => s.selected[prop];
     s.RRReadManagedPosition = (symbol, magic, id, state) => {
-        const position = s.positions.get(id); if (!s.readable || !position) return false;
+        const position = s.positions.get(id); if (!s.readable || !position || !position.plan) return false;
+        assert.equal(symbol, position.symbol); assert.equal(magic, position.magic);
         Object.assign(state, structuredClone(position)); s.selected = position; return true;
     };
     s.RRStatePlan = (state, plan) => Object.assign(plan, structuredClone(state.plan));
@@ -93,6 +118,8 @@ function fixture(count = 2) {
     s.PositionSelectByTicket = () => true;
     s.RRSelectManagedPosition = (symbol, magic, id) => s.positions.has(id);
     s.PositionGetDouble = prop => s.selected[prop];
+    s.closeCalls = []; s.closeAllowed = true;
+    s.RMRequestClose = (id, percent, magic) => { s.closeCalls.push({ id, percent, magic, snapshot: s.positions.get(id)?.volume }); return s.closeAllowed; };
     s.RRApplyPositionPlan = (symbol, magic, id, plan, checksum, stage) => {
         s.positionApplyCalls.push({ symbol, magic, id, plan: structuredClone(plan), checksum, stage });
         const p = s.positions.get(id);
@@ -100,17 +127,22 @@ function fixture(count = 2) {
         p.plan = structuredClone(plan); return true;
     };
     s.SetRRStatus = (text, error = false) => { s.status = { text, error }; };
-    s.RRPlanCanEdit = () => { s.canEditCalls++; return s.canEdit; };
+    s.RRPlanCanEdit = (symbol, magic) => { s.canEditCalls++; assert.equal(symbol, ''); assert.equal(magic, s.sets.MagicNumber); return s.canEdit; };
     s.RRPlanApply = plan => { s.applyCalls++; if (!s.applyAllowed) return false; s.RRActivePlan = structuredClone(plan); return true; };
+    s.defaultReadAllowed = true; s.defaultReadCalls = 0;
+    s.RRPlanFileName = () => 'account-plan.bin';
+    s.RRPlanRead = (_filename, target) => { s.defaultReadCalls++; if (!s.defaultReadAllowed) return false; if (s.newerDefault) Object.assign(target, structuredClone(s.newerDefault)); return true; };
     s.RRPlanFinalR = () => s.RRActivePlan.targets[s.RRActivePlan.count - 1].multiple;
     s.ProcessTPChange = value => s.updates.push(['TP', value]);
     s.RefreshValues = () => s.updates.push(['refresh']);
     s.SaveSettingsOnDisk = symbol => s.updates.push(['settings', symbol]);
     const context = vm.createContext(s);
-    for (const name of ['LoadRRDraft', 'FillRRDraft', 'LoadRRPositionDraft', 'UpdateRRModeLabels', 'CaptureRRPage', 'RenderRRPage', 'OnClickBtnRRAdd', 'OnClickBtnRRDelete',
+    for (const name of ['CreateRRControls', 'LoadRRDraft', 'FillRRDraft', 'LoadRRPositionDraft', 'UpdateRRModeLabels', 'CaptureRRPage', 'RenderRRPage', 'OnClickBtnRRAdd', 'OnClickBtnRRDelete',
                          'RefreshRRTargetPrices', 'RefreshRRPlanSummary', 'RefreshRRLiveStatus', 'OnClickBtnRRNewPlan', 'OnClickBtnRRPosition',
-                         'OnClickBtnRRPrevious', 'OnClickBtnRRNext', 'OnClickBtnRRReset', 'OnClickBtnRRSave'])
+                         'OnClickBtnRRPrevious', 'OnClickBtnRRNext', 'OnClickBtnRRReset', 'OnClickBtnRRSave', 'SelectRRPanelPosition',
+                         'RefreshRRPositionChoices', 'OnChangeRRPosition', 'OnChangeRRClosePercent', 'OnClickRRManualClose'])
         vm.runInContext(extract(name), context);
+    s.selectPosition = id => { s.RefreshRRPositionChoices(); s.m_CmbRRPosition.SelectByValue(id); s.OnChangeRRPosition(); };
     s.LoadRRDraft();
     return s;
 }
@@ -216,33 +248,33 @@ function addPosition(s, id = 42, overrides = {}) {
     const plan = makePlan(); plan.count = 2;
     plan.targets[0] = { multiple: 2, percent: 50, move_be: 1 };
     plan.targets[1] = { multiple: 5, percent: 50, move_be: 0 };
-    const position = { version: 2, identifier: id, stage: 0, blocked: 0, direction: -1,
+    const position = { version: 2, identifier: id, ticket: id + 10000, symbol: 'AUDUSD', magic: 123, type: 1, stage: 0, blocked: 0, direction: -1,
         entry: 4341.74, risk: 7.68, initial_volume: 0.32, volume: 0.32, tp: 4303.34, plan, ...overrides };
     s.positions.set(id, position); return position;
 }
 check('new-plan previews use calculator entry, while live targets use frozen actual fill', () => {
     const s = fixture(); addPosition(s);
     assert.match(s.m_LblRRPrice[0].Text(), /新仓预览 110/);
-    s.OnClickBtnRRPosition();
+    s.selectPosition(42);
     assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_BtnRRSave.Text(), '应用到该持仓');
     assert.match(s.m_LblRRPrice[0].Text(), /4326.38/); assert.match(s.m_LblRRPrice[1].Text(), /4303.34/);
     assert.match(s.m_LblRRBEInfo.Text(), /4341.74.*7.68/); assert.match(s.m_LblRRPositionInfo.Text(), /0.32.*TP已同步/);
 });
 check('draft target prices update without moving applied position targets', () => {
-    const s = fixture(); const p = addPosition(s); s.OnClickBtnRRPosition();
+    const s = fixture(); const p = addPosition(s); s.selectPosition(42);
     s.m_EdtRRMultiple[0].Text('3'); s.RefreshRRTargetPrices();
     assert.match(s.m_LblRRPrice[0].Text(), /草稿价 4318.7.*未应用/);
     assert.equal(p.plan.targets[0].multiple, 2); assert.equal(s.positionApplyCalls.length, 0);
 });
 check('live quote refresh preserves unfinished numeric text and BE edits', () => {
-    const s = fixture(); const p = addPosition(s); s.OnClickBtnRRPosition();
+    const s = fixture(); const p = addPosition(s); s.selectPosition(42);
     s.m_EdtRRMultiple[0].Text('1..'); s.m_ChkRRBreakEven[1].Checked(true); p.volume = 0.24;
     s.tick += 600; s.RefreshRRLiveStatus();
     assert.equal(s.m_EdtRRMultiple[0].Text(), '1..'); assert.equal(s.m_ChkRRBreakEven[1].Checked(), true);
     assert.match(s.m_LblRRPositionInfo.Text(), /0.24/); assert.match(s.m_LblRRPrice[0].Text(), /请输入有效/);
 });
 check('stage advancing preserves draft but locks stale save until explicit reload', () => {
-    const s = fixture(); const p = addPosition(s); s.OnClickBtnRRPosition();
+    const s = fixture(); const p = addPosition(s); s.selectPosition(42);
     s.m_EdtRRMultiple[1].Text('6'); p.stage = 1; s.tick += 600; s.RefreshRRLiveStatus();
     assert.equal(s.m_EdtRRMultiple[1].Text(), '6'); assert.equal(s.m_rr_stale, true);
     assert.equal(s.m_BtnRRSave.enabled, false); assert.equal(s.m_EdtRRMultiple[0].readonly, true);
@@ -251,14 +283,14 @@ check('stage advancing preserves draft but locks stale save until explicit reloa
     assert.equal(s.m_EdtRRMultiple[0].readonly, true); assert.equal(s.m_EdtRRMultiple[1].readonly, false);
 });
 check('other-chart plan change marks draft stale even when execution stage stays unchanged', () => {
-    const s = fixture(); const p = addPosition(s); s.OnClickBtnRRPosition();
+    const s = fixture(); const p = addPosition(s); s.selectPosition(42);
     p.plan.targets[1].multiple = 7; s.tick += 600; s.RefreshRRLiveStatus();
     assert.equal(s.m_rr_stale, true); assert.equal(s.m_EdtRRMultiple[1].Text(), '5');
     s.OnClickBtnRRReset(); assert.equal(s.m_EdtRRMultiple[1].Text(), '7');
 });
 check('triggered rows cannot change or be deleted and retain full numeric precision on apply', () => {
     const s = fixture(); const p = addPosition(s, 42, { stage: 1 }); p.plan.targets[0].multiple = 1.123456789123;
-    s.OnClickBtnRRPosition(); s.m_EdtRRMultiple[0].Text('999'); s.m_EdtRRPercent[0].Text('0');
+    s.selectPosition(42); s.m_EdtRRMultiple[0].Text('999'); s.m_EdtRRPercent[0].Text('0');
     s.m_ChkRRBreakEven[0].Checked(false); s.OnClickBtnRRDelete(0); s.m_EdtRRMultiple[1].Text('6'); s.OnClickBtnRRSave();
     assert.equal(p.plan.count, 2); assert.equal(p.plan.targets[0].multiple, 1.123456789123);
     assert.equal(p.plan.targets[0].percent, 50); assert.equal(p.plan.targets[0].move_be, 1);
@@ -266,21 +298,21 @@ check('triggered rows cannot change or be deleted and retain full numeric precis
 });
 check('apply saves only the selected position and reports server TP awaiting synchronization', () => {
     const s = fixture(); const p = addPosition(s); const p2 = addPosition(s, 99); const newPlan = JSON.stringify(s.RRActivePlan);
-    s.OnClickBtnRRPosition(); s.m_EdtRRMultiple[1].Text('6'); s.OnClickBtnRRSave();
+    s.selectPosition(42); s.m_EdtRRMultiple[1].Text('6'); s.OnClickBtnRRSave();
     assert.equal(p.plan.targets[1].multiple, 6); assert.equal(p2.plan.targets[1].multiple, 5);
     assert.equal(JSON.stringify(s.RRActivePlan), newPlan); assert.equal(s.applyCalls, 0); assert.equal(s.updates.length, 0);
     assert.match(s.status.text, /最终 TP 待服务器同步/); assert.match(s.m_LblRRPositionInfo.Text(), /TP待同步/);
     assert.equal(s.m_rr_dirty, false);
 });
 check('race between last refresh and apply passes frozen checksum/stage for engine rejection', () => {
-    const s = fixture(); const p = addPosition(s); s.OnClickBtnRRPosition(); const baseline = s.m_rr_expected_checksum;
+    const s = fixture(); const p = addPosition(s); s.selectPosition(42); const baseline = s.m_rr_expected_checksum;
     s.m_EdtRRMultiple[1].Text('6'); p.stage = 1; s.OnClickBtnRRSave();
     assert.equal(s.positionApplyCalls.length, 1); assert.equal(s.positionApplyCalls[0].stage, 0);
     assert.equal(s.positionApplyCalls[0].checksum, baseline); assert.equal(p.plan.targets[1].multiple, 5);
     assert.equal(s.status.error, true); assert.equal(s.m_EdtRRMultiple[1].Text(), '6');
 });
 check('legacy positions show actual targets but all mutations remain disabled', () => {
-    const s = fixture(); addPosition(s, 42, { version: 1, stage: 2 }); s.OnClickBtnRRPosition();
+    const s = fixture(); addPosition(s, 42, { version: 1, stage: 2 }); s.selectPosition(42);
     assert.equal(s.m_rr_readonly, true); assert.equal(s.m_rr_live_stage, 1);
     assert.match(s.m_LblRRPrice[0].Text(), /已触发/); assert.match(s.m_LblRRPrice[1].Text(), /待触发/);
     assert.equal(s.m_BtnRRSave.enabled, false); assert.equal(s.m_BtnRRAdd.enabled, false);
@@ -289,44 +321,45 @@ check('legacy positions show actual targets but all mutations remain disabled', 
 });
 check('switching modes cannot silently discard uncommitted text', () => {
     const s = fixture(); addPosition(s); addPosition(s, 99);
-    s.m_EdtRRMultiple[0].Text('1.5'); s.OnClickBtnRRPosition(); assert.equal(s.m_rr_position_id, 0);
-    assert.match(s.status.text, /先保存或撤销/); s.OnClickBtnRRReset(); s.OnClickBtnRRPosition();
+    s.m_EdtRRMultiple[0].Text('1.5'); s.selectPosition(42); assert.equal(s.m_rr_position_id, 0);
+    assert.match(s.status.text, /先保存或撤销/); s.OnClickBtnRRReset(); s.selectPosition(42);
     s.m_EdtRRMultiple[1].Text('6'); s.OnClickBtnRRNewPlan(); assert.equal(s.m_rr_position_id, 42);
-    s.OnClickBtnRRPosition(); assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_EdtRRMultiple[1].Text(), '6');
+    s.selectPosition(99); assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_EdtRRMultiple[1].Text(), '6');
 });
-check('position cycle isolates plans and wraps without returning to new-plan mode', () => {
+check('position dropdown directly selects isolated plans without returning to new-plan mode', () => {
     const s = fixture(); addPosition(s); const p = addPosition(s, 99); p.plan.targets[1].multiple = 8;
-    s.OnClickBtnRRPosition(); assert.equal(s.m_rr_position_id, 42);
-    s.OnClickBtnRRPosition(); assert.equal(s.m_rr_position_id, 99); assert.equal(s.m_EdtRRMultiple[1].Text(), '8');
-    s.OnClickBtnRRPosition(); assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_EdtRRMultiple[1].Text(), '5');
+    s.selectPosition(42); assert.equal(s.m_rr_position_id, 42);
+    s.selectPosition(99); assert.equal(s.m_rr_position_id, 99); assert.equal(s.m_EdtRRMultiple[1].Text(), '8');
+    s.selectPosition(42); assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_EdtRRMultiple[1].Text(), '5');
     s.OnClickBtnRRNewPlan(); assert.equal(s.m_rr_position_id, 0); assert.equal(s.m_BtnRRSave.Text(), '保存新仓方案');
 });
 check('transient state read failure preserves live draft and allows guarded retry', () => {
-    const s = fixture(); addPosition(s); s.OnClickBtnRRPosition(); s.m_EdtRRMultiple[1].Text('6');
+    const s = fixture(); addPosition(s); s.selectPosition(42); s.m_EdtRRMultiple[1].Text('6');
     s.readable = false; s.tick += 600; s.RefreshRRLiveStatus();
     assert.equal(s.m_EdtRRMultiple[1].Text(), '6'); assert.match(s.m_LblRRPositionInfo.Text(), /草稿已保留/);
     s.readable = true; s.tick += 600; s.RefreshRRLiveStatus(); assert.equal(s.m_rr_stale, false);
 });
 check('legacy or blocked position remains read-only after reset', () => {
-    const s = fixture(); addPosition(s, 42, { blocked: 1 }); s.OnClickBtnRRPosition(); s.OnClickBtnRRReset();
+    const s = fixture(); addPosition(s, 42, { blocked: 1 }); s.selectPosition(42); s.OnClickBtnRRReset();
     assert.equal(s.m_rr_readonly, true); assert.equal(s.m_EdtRRMultiple[0].readonly, true);
 });
 check('closed position can explicitly discard its dirty draft and return to new-plan mode', () => {
-    const s = fixture(); addPosition(s); s.OnClickBtnRRPosition(); s.m_EdtRRMultiple[1].Text('6'); s.CaptureRRPage();
+    const s = fixture(); addPosition(s); s.selectPosition(42); s.m_EdtRRMultiple[1].Text('6'); s.CaptureRRPage();
     s.positions.delete(42); s.tick += 600; s.RefreshRRLiveStatus(); s.OnClickBtnRRReset();
     assert.equal(s.m_rr_position_id, 0); assert.equal(s.m_rr_dirty, false); assert.match(s.status.text, /持仓已关闭/);
 });
 check('reset with a busy journal keeps a still-open position draft intact', () => {
-    const s = fixture(); addPosition(s); s.OnClickBtnRRPosition(); s.m_EdtRRMultiple[1].Text('6'); s.CaptureRRPage();
+    const s = fixture(); addPosition(s); s.selectPosition(42); s.m_EdtRRMultiple[1].Text('6'); s.CaptureRRPage();
     s.readable = false; s.OnClickBtnRRReset();
     assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_rr_dirty, true); assert.equal(s.m_EdtRRMultiple[1].Text(), '6');
 });
-check('single-position next button wraps and reports that same position without losing selection', () => {
-    const s = fixture(); addPosition(s); s.OnClickBtnRRPosition(); s.OnClickBtnRRPosition();
-    assert.equal(s.m_rr_position_id, 42); assert.match(s.status.text, /只有这一笔/);
+check('refreshing the dropdown retains current position and unfinished plan text', () => {
+    const s = fixture(); addPosition(s); s.selectPosition(42); s.m_EdtRRMultiple[1].Text('6..'); s.OnClickBtnRRPosition();
+    assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_CmbRRPosition.Value(), 42); assert.match(s.status.text, /已刷新/);
+    assert.equal(s.m_EdtRRMultiple[1].Text(), '6..');
 });
 check('fine volume steps remain visible in both original and remaining quantities', () => {
-    const s = fixture(); addPosition(s, 42, { initial_volume: 0.003, volume: 0.001 }); s.OnClickBtnRRPosition();
+    const s = fixture(); addPosition(s, 42, { initial_volume: 0.003, volume: 0.001 }); s.selectPosition(42);
     assert.match(s.m_LblRRInfo.Text(), /初始 0.003 手/); assert.match(s.m_LblRRPositionInfo.Text(), /余仓 0.001 手/);
 });
 check('runner percentage preview updates directly from typing and distinguishes saved allocation', () => {
@@ -342,14 +375,14 @@ check('saved runner new-plan feedback retains unallocated volume and does not in
     assert.match(s.status.text, /保留余仓，不设置全平 TP/); assert.match(s.m_LblRRBEInfo.Text(), /仅勾 BE/);
 });
 check('live runner reports pending cancellation until the actual server TP is exactly zero', () => {
-    const s = fixture(); const p = addPosition(s); p.plan.targets[1].percent = 25; s.OnClickBtnRRPosition();
+    const s = fixture(); const p = addPosition(s); p.plan.targets[1].percent = 25; s.selectPosition(42);
     assert.match(s.m_LblRRInfo.Text(), /已安排 75% \/ 保留 25%/);
     assert.match(s.m_LblRRPositionInfo.Text(), /旧TP待取消 4303.34/);
     p.tp = 0.00001; s.tick += 600; s.RefreshRRLiveStatus(); assert.match(s.m_LblRRPositionInfo.Text(), /旧TP待取消/);
     p.tp = 0; s.tick += 600; s.RefreshRRLiveStatus(); assert.match(s.m_LblRRPositionInfo.Text(), /全平TP已取消/);
 });
 check('changing a full-close live plan to a runner preserves the selected BE flags', () => {
-    const s = fixture(); const p = addPosition(s); s.OnClickBtnRRPosition();
+    const s = fixture(); const p = addPosition(s); s.selectPosition(42);
     s.m_EdtRRPercent[1].Text('25'); s.m_ChkRRBreakEven[1].Checked(true); s.OnClickBtnRRSave();
     assert.equal(p.plan.targets[0].percent, 50); assert.equal(p.plan.targets[1].percent, 25);
     assert.equal(p.plan.targets[0].move_be, 1); assert.equal(p.plan.targets[1].move_be, 1);
@@ -357,7 +390,7 @@ check('changing a full-close live plan to a runner preserves the selected BE fla
 });
 check('all runner targets may already be triggered while adding a new future target remains available', () => {
     const s = fixture(); const p = addPosition(s, 42, { stage: 2, volume: 0.08, tp: 0 }); p.plan.targets[1].percent = 25;
-    s.OnClickBtnRRPosition(); assert.equal(s.m_BtnRRAdd.enabled, true);
+    s.selectPosition(42); assert.equal(s.m_BtnRRAdd.enabled, true);
     assert.equal(s.m_EdtRRMultiple[0].readonly, true); assert.equal(s.m_EdtRRMultiple[1].readonly, true);
     s.OnClickBtnRRAdd(); assert.equal(s.m_EdtRRMultiple[2].readonly, false); s.m_EdtRRPercent[2].Text('25');
     s.OnClickBtnRRSave(); assert.equal(p.plan.count, 3); assert.equal(p.plan.targets[2].multiple, 6);
@@ -380,5 +413,116 @@ check('invalid and excessive percentages do not advertise a valid retained balan
     assert.match(s.m_LblRRInfo.Text(), /未填完整/); assert.equal(s.m_EdtRRPercent[0].Text(), '1..');
     s.m_EdtRRPercent[0].Text('75'); s.RefreshRRTargetPrices(); assert.match(s.m_LblRRInfo.Text(), /125%.*超出 100%/);
     assert.equal(s.m_LblRRInfo.color, 'error'); assert.equal(s.RRActivePlan.targets[0].percent, 50);
+});
+check('position dropdown includes all symbols and magic numbers with actual ticket and side', () => {
+    const s = fixture(); addPosition(s, 42, { symbol: 'XAUUSD', magic: 0, type: 0 });
+    addPosition(s, 99, { symbol: 'EURUSD.a', magic: 888 }); s.RefreshRRPositionChoices();
+    assert.match(s.m_CmbRRPosition.items[1].text, /^XAUUSD #10042 买入$/);
+    assert.match(s.m_CmbRRPosition.items[2].text, /^EURUSD.a #10099 卖出$/);
+    assert.equal(s.m_rr_position_id, 0); assert.equal(s.closeCalls.length, 0);
+});
+check('a different symbol managed position reads and applies using its actual magic', () => {
+    const s = fixture(); addPosition(s, 99, { symbol: 'EURUSD.a', magic: 888 }); s.selectPosition(99);
+    s.m_EdtRRMultiple[1].Text('7'); s.OnClickBtnRRSave();
+    assert.equal(s.positionApplyCalls[0].symbol, 'EURUSD.a'); assert.equal(s.positionApplyCalls[0].magic, 888);
+    assert.equal(s.SymbolForTrading, 'AUDUSD');
+});
+check('manual positions without journals expose only manual exit without invented R or target rows', () => {
+    const s = fixture(); addPosition(s, 42, { symbol: 'XAUUSD', magic: 0, plan: null }); s.selectPosition(42);
+    assert.equal(s.m_rr_has_plan, false); assert.equal(s.m_rr_readonly, true); assert.equal(s.m_rr_count, 0);
+    assert.equal(s.m_BtnRRSave.enabled, false); assert.equal(s.m_BtnRRAdd.enabled, false);
+    assert.ok(s.m_EdtRRMultiple.every(c => !c.visible)); assert.match(s.m_LblRRBEInfo.Text(), /不提供 R/);
+    assert.match(s.m_LblRRPositionInfo.Text(), /仅手动平仓/); assert.equal(s.m_BtnRRManualClose.enabled, true);
+    s.OnClickBtnRRSave(); assert.equal(s.positionApplyCalls.length, 0); assert.equal(s.applyCalls, 0);
+});
+check('all preset percentages populate the editable percentage without requesting a close', () => {
+    const s = fixture(); for (const percent of [25, 50, 75, 100]) {
+        s.m_CmbRRClosePercent.SelectByValue(percent); s.OnChangeRRClosePercent(); assert.equal(s.m_EdtRRClosePercent.Text(), String(percent));
+    }
+    assert.equal(s.closeCalls.length, 0);
+    s.m_EdtRRClosePercent.Text('12.5'); s.m_CmbRRClosePercent.SelectByValue(0); s.OnChangeRRClosePercent();
+    assert.equal(s.m_EdtRRClosePercent.Text(), '12.5');
+});
+check('custom manual percentage closes the selected manual position from click-time remaining volume', () => {
+    const s = fixture(); const p = addPosition(s, 99, { magic: 0, plan: null, volume: 0.32 }); s.selectPosition(99);
+    s.m_EdtRRClosePercent.Text('12.5'); p.volume = 0.08; s.OnClickRRManualClose();
+    assert.deepEqual(s.closeCalls, [{ id: 99, percent: 12.5, magic: 123, snapshot: 0.08 }]);
+    assert.match(s.status.text, /12.5%.*以成交回报为准/); assert.equal(s.positionApplyCalls.length, 0);
+});
+check('manual percentage validation rejects empty malformed zero negative or above-100 values', () => {
+    const s = fixture(); addPosition(s); s.selectPosition(42);
+    for (const percent of ['', 'abc', '0', '-25', '101', 'NaN', '1e999']) {
+        s.m_EdtRRClosePercent.Text(percent); s.OnClickRRManualClose(); assert.equal(s.status.error, true);
+    }
+    assert.equal(s.closeCalls.length, 0);
+});
+check('manual close has no implicit selected position while viewing a new plan', () => {
+    const s = fixture(); addPosition(s); s.m_EdtRRClosePercent.Text('50'); s.OnClickRRManualClose();
+    assert.equal(s.closeCalls.length, 0); assert.match(s.status.text, /先.*选择/);
+});
+check('manual action preserves an unfinished RR draft and does not submit that draft', () => {
+    const s = fixture(); addPosition(s); s.selectPosition(42); s.m_EdtRRMultiple[1].Text('7..');
+    s.m_EdtRRClosePercent.Text('50'); s.OnClickRRManualClose();
+    assert.equal(s.m_EdtRRMultiple[1].Text(), '7..'); assert.equal(s.positionApplyCalls.length, 0); assert.equal(s.closeCalls.length, 1);
+});
+check('closed selection remains identifiable and disables close until another position is chosen', () => {
+    const s = fixture(); addPosition(s); s.selectPosition(42); s.positions.delete(42); s.tick += 600; s.RefreshRRLiveStatus();
+    assert.equal(s.m_BtnRRManualClose.enabled, false); assert.match(s.m_CmbRRPosition.items.at(-1).text, /已关闭/);
+    assert.equal(s.m_rr_position_id, 42); s.OnClickBtnRRReset(); assert.equal(s.m_rr_position_id, 0);
+});
+check('refresh and dropdown reconstruction do not rewrite a custom manual percentage', () => {
+    const s = fixture(); addPosition(s); s.selectPosition(42); s.m_EdtRRClosePercent.Text('37.25');
+    addPosition(s, 99); s.tick += 600; s.RefreshRRLiveStatus(); s.OnClickBtnRRPosition();
+    assert.equal(s.m_EdtRRClosePercent.Text(), '37.25'); assert.equal(s.m_CmbRRPosition.Value(), 42);
+});
+check('actual RR control creation keeps manual actions and all five targets inside the panel', () => {
+    for (const scale of [1, 1.25, 1.5, 2]) {
+        const s = fixture(); s.m_DPIScale = scale; s.first_column_start = Math.round(7 * scale); s.element_height = Math.round(20 * scale);
+        assert.equal(s.CreateRRControls(), true);
+        const right = s.first_column_start + Math.round(307 * scale);
+        for (const control of s.RRTabList) assert.ok(control.rect[0] >= s.first_column_start && control.rect[2] <= right, control.name);
+        assert.ok(s.m_CmbRRPosition.rect[3] < s.m_CmbRRClosePercent.rect[1]);
+        assert.ok(s.m_CmbRRClosePercent.rect[2] < s.m_EdtRRClosePercent.rect[0]);
+        assert.ok(s.m_EdtRRClosePercent.rect[2] < s.m_BtnRRManualClose.rect[0]);
+        assert.ok(s.m_LblRRManualInfo.rect[3] < s.m_LblRRInfo.rect[1]);
+        assert.ok(s.m_LblRRPrice[4].rect[3] < s.m_BtnRRNext.rect[1]);
+        assert.ok(s.m_BtnRRSave.rect[3] < s.m_LblRRStatus.rect[1]);
+        assert.ok(s.m_LblRRStatus2.rect[3] < Math.round(600 * scale));
+    }
+});
+check('inventory refresh cannot dismiss an open dropdown or replace a queued user selection', () => {
+    const s = fixture(); addPosition(s); s.RefreshRRPositionChoices();
+    s.m_CmbRRPosition.expanded = true; addPosition(s, 99); s.RefreshRRPositionChoices();
+    assert.equal(s.m_CmbRRPosition.items.length, 2);
+    s.m_CmbRRPosition.expanded = false; s.m_CmbRRPosition.SelectByValue(42); s.RefreshRRPositionChoices();
+    assert.equal(s.m_CmbRRPosition.Value(), 42); assert.equal(s.m_CmbRRPosition.items.length, 2);
+    s.OnChangeRRPosition(); s.RefreshRRPositionChoices();
+    assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_CmbRRPosition.items.length, 3);
+});
+check('new-plan reset reloads the shared plan saved by another chart', () => {
+    const s = fixture(); s.m_EdtRRMultiple[1].Text('9'); s.newerDefault = structuredClone(s.RRActivePlan); s.newerDefault.targets[1].multiple = 7;
+    s.OnClickBtnRRReset(); assert.equal(s.defaultReadCalls, 1); assert.equal(s.m_EdtRRMultiple[1].Text(), '7'); assert.equal(s.m_rr_dirty, false);
+});
+check('new-plan reset keeps unfinished draft when shared file cannot be read', () => {
+    const s = fixture(); s.m_EdtRRMultiple[1].Text('9..'); s.CaptureRRPage(); s.defaultReadAllowed = false;
+    s.OnClickBtnRRReset(); assert.equal(s.m_EdtRRMultiple[1].Text(), '9..'); assert.equal(s.m_rr_dirty, true); assert.equal(s.status.error, true);
+});
+check('pristine new-plan editor follows active shared-plan reload after chart symbol change', () => {
+    const s = fixture(); s.RRActivePlan.targets[1].multiple = 8; s.tick += 600; s.RefreshRRLiveStatus();
+    assert.equal(s.m_EdtRRMultiple[1].Text(), '8'); assert.equal(s.m_rr_stale, false); assert.equal(s.m_BtnRRSave.enabled, true);
+});
+check('dirty new-plan editor keeps unfinished text and locks save when shared baseline changes', () => {
+    const s = fixture(); s.m_EdtRRMultiple[1].Text('9..'); s.RRActivePlan.targets[1].multiple = 8; s.tick += 600; s.RefreshRRLiveStatus();
+    assert.equal(s.m_EdtRRMultiple[1].Text(), '9..'); assert.equal(s.m_rr_stale, true); assert.equal(s.m_BtnRRSave.enabled, false);
+    s.OnClickBtnRRSave(); assert.equal(s.applyCalls, 0); s.OnClickBtnRRReset(); assert.equal(s.m_EdtRRMultiple[1].Text(), '8'); assert.equal(s.m_rr_stale, false);
+});
+check('queued Save detects active baseline change before any timer refresh and cannot revert shared plan', () => {
+    const s = fixture(); s.RRActivePlan.targets[1].multiple = 8; s.OnClickBtnRRSave();
+    assert.equal(s.applyCalls, 0); assert.equal(s.canEditCalls, 0); assert.equal(s.m_rr_stale, true);
+    assert.equal(s.m_EdtRRMultiple[1].Text(), '2'); assert.equal(s.RRActivePlan.targets[1].multiple, 8);
+});
+check('shared default updates do not replace a frozen live-position editor', () => {
+    const s = fixture(); addPosition(s); s.selectPosition(42); s.RRActivePlan.targets[1].multiple = 8;
+    s.tick += 600; s.RefreshRRLiveStatus(); assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_EdtRRMultiple[1].Text(), '5'); assert.equal(s.m_rr_stale, false);
 });
 console.log(`RR plan UI: ${count} production-method tests passed.`);

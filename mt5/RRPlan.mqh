@@ -142,13 +142,21 @@ uint RRPlanChecksum(const RRPlan &plan)
     return hash;
 }
 
-string RRPlanFileName()
+string RRLegacyPlanFileName()
 {
     // Per chart and symbol, stable across terminal restarts/timeframe changes.
     uint hash = 2166136261;
     for (int i = 0; i < StringLen(_Symbol); i++)
         hash = (hash ^ (uint)StringGetCharacter(_Symbol, i)) * 16777619;
     return "PSRR_Settings\\RRPlan_" + IntegerToString(ChartID()) + "_" + IntegerToString(hash) + ".bin";
+}
+
+string RRPlanFileName()
+{
+    uint hash = 2166136261;
+    string server = AccountInfoString(ACCOUNT_SERVER);
+    for (int i = 0; i < StringLen(server); i++) hash = (hash ^ (uint)StringGetCharacter(server, i)) * 16777619;
+    return "PSRR_Settings\\RRPlan_Account_" + IntegerToString(hash) + "_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + ".bin";
 }
 
 bool RRPlanRead(const string filename, RRPlan &plan, string &error)
@@ -168,7 +176,7 @@ bool RRPlanRead(const string filename, RRPlan &plan, string &error)
     return true;
 }
 
-bool RRPlanApply(const RRPlan &plan, string &error)
+bool RRPlanSaveUnlocked(const RRPlan &plan, string &error)
 {
     if (!RRPlanValidate(plan, error)) return false;
     RRPlanRecord record;
@@ -177,7 +185,7 @@ bool RRPlanApply(const RRPlan &plan, string &error)
     record.plan = plan;
     record.checksum = RRPlanChecksum(plan);
     string filename = RRPlanFileName();
-    string temporary = filename + ".tmp";
+    string temporary = filename + "." + IntegerToString(ChartID()) + ".tmp";
     int handle = FileOpen(temporary, FILE_WRITE | FILE_BIN);
     if (handle == INVALID_HANDLE) { error = "无法保存止盈方案，请检查文件权限。"; return false; }
     ResetLastError();
@@ -194,11 +202,40 @@ bool RRPlanApply(const RRPlan &plan, string &error)
     return true;
 }
 
+bool RRPlanApply(const RRPlan &plan, string &error)
+{
+    string filename = RRPlanFileName();
+    int lock = FileOpen(filename + ".lock", FILE_READ | FILE_WRITE | FILE_BIN);
+    if (lock == INVALID_HANDLE) { error = "新仓方案正在由另一个面板保存，请稍后再试。"; return false; }
+    RRPlan current;
+    bool ok = true;
+    if (FileIsExist(filename))
+    {
+        ok = RRPlanRead(filename, current, error);
+        if (ok && RRPlanChecksum(current) != RRPlanChecksum(RRActivePlan))
+        { error = "其他面板已更改共用新仓方案，请重新载入后修改。"; ok = false; }
+    }
+    if (ok) ok = RRPlanSaveUnlocked(plan, error);
+    FileClose(lock);
+    return ok;
+}
+
 bool RRPlanInitialize(const double first, const double percent, const double final_r, const bool be, string &error)
 {
     RRPlanDefaults(first, percent, final_r, be);
     string filename = RRPlanFileName();
-    if (FileIsExist(filename)) return RRPlanRead(filename, RRActivePlan, error);
-    return RRPlanValidate(RRActivePlan, error);
+    // Serialize first-use migration with every subsequent save.
+    int lock = FileOpen(filename + ".lock", FILE_READ | FILE_WRITE | FILE_BIN);
+    if (lock == INVALID_HANDLE) { error = "共用新仓方案暂时无法读取，请稍后重载。"; return false; }
+    bool ok;
+    if (FileIsExist(filename)) ok = RRPlanRead(filename, RRActivePlan, error);
+    else
+    {
+        string legacy = RRLegacyPlanFileName();
+        ok = !FileIsExist(legacy) || RRPlanRead(legacy, RRActivePlan, error);
+        if (ok) ok = RRPlanSaveUnlocked(RRActivePlan, error);
+    }
+    FileClose(lock);
+    return ok;
 }
 #endif

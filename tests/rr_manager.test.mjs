@@ -18,7 +18,7 @@ function extract(source, name) {
         if (source[end] === '}') depth--;
     }
     assert.equal(depth, 0);
-    const parameters = match[1].split(',').map(parameter => {
+    const parameters = match[1].split(',').filter(parameter => parameter.trim()).map(parameter => {
         const arg = /^\s*(?:const\s+)?(?:int|double|bool|ulong|long|string|RRState)\s*&?\s*(\w+)\s*$/.exec(parameter);
         assert.ok(arg, `Unsupported argument: ${parameter}`);
         return arg[1];
@@ -26,7 +26,7 @@ function extract(source, name) {
     let body = source.slice(start, end - 1)
         .replace(/\bRRState\s+(\w+)\s*;/g, 'let $1 = {};')
         .replace(/\bMqlTick\s+(\w+)\s*;/g, 'let $1 = {};')
-        .replace(/\bMqlTrade(?:Request|Result)\s+(\w+)\s*=\s*\{\}/g, 'let $1 = {}')
+        .replace(/\bMqlTrade(?:Request|Result|CheckResult)\s+(\w+)\s*=\s*\{\}/g, 'let $1 = {}')
         .replace(/\b(?:const\s+)?(?:double|int|bool|ulong|long|string)\s+(?=[A-Za-z_]\w*\s*(?:=|;))/g, 'let ')
         .replace(/\((?:long|double|int|ulong)\)/g, '');
     // MQL primitive output references require an explicit JS adapter. It writes
@@ -688,5 +688,201 @@ check('previously valid near-100 v2 plan still closes the exact remainder', () =
     assert.equal(run(s, { bid: 150, ask: 150.2, volume: 0.65 }).closes[0].volume, 0.65);
 });
 
-process.stdout.write(`\n${passed} manager tests passed against production RRProcess/RRProcessMulti/RRResolvePending/RRUpdateStops/RRCapture/RRPlanCanEdit.\n`);
+// Whole-account fixture: real capture, target decisions, stop updates and close
+// request builders; only MT5/account/file/broker boundaries are substituted.
+function multiSymbolFixture() {
+    const b = { account: 11, server: 'Demo', now: 100, tick: 1000, reason: 0,
+        positions: [], journals: new Map(), handles: new Map(), nextHandle: 1, sends: [], saves: [],
+        symbolReads: [], manual: new Set(), risk: new Set(), orders: [], afterOpen: null };
+    const symbols = {
+        XAUUSD: { step: 0.1, minimum: 0.1, maximum: 5, tickSize: 0.1, point: 0.01, digits: 2, bid: 2020, ask: 2020.1, fill: 1 },
+        EURUSD: { step: 0.01, minimum: 0.01, maximum: 1, tickSize: 0.00001, point: 0.00001, digits: 5, bid: 1.0799, ask: 1.08, fill: 2 },
+    };
+    const extraConstants = ['ACCOUNT_LOGIN', 'ACCOUNT_SERVER', 'SYMBOL_VOLUME_MAX', 'TRADE_ACTION_DEAL',
+        'ORDER_TYPE_SELL', 'ORDER_TYPE_BUY', 'SYMBOL_FILLING_MODE', 'SYMBOL_TRADE_EXEMODE',
+        'SYMBOL_TRADE_EXECUTION_INSTANT', 'SYMBOL_TRADE_EXECUTION_REQUEST', 'ORDER_FILLING_FOK', 'ORDER_FILLING_IOC', 'DEAL_ORDER'];
+    const c = vm.createContext({
+        ...Object.fromEntries([...constants, ...extraConstants].map(name => [name, name])),
+        FILE_READ: 1, FILE_WRITE: 2, FILE_BIN: 4, INVALID_HANDLE: -1, SYMBOL_FILLING_FOK: 1, SYMBOL_FILLING_IOC: 2,
+        RR_MAX_TARGETS: 20, RR_Enable: true, RR_BEOffsetPoints: 0, RR_DeviationPoints: 20,
+        RR_FirstTarget: 2, RR_ClosePercent: 50, RR_FinalTarget: 5, RR_MoveToBE: true,
+        RRAccount: 11, RRServer: 'Demo', RRLastRun: 0, RRExistingIDs: [], RRHasSnapshot: true, REASON_CHARTCHANGE: 3,
+        RRActivePlan: { count: 2, targets: [{ multiple: 2, percent: 50, move_be: 1 }, { multiple: 5, percent: 50, move_be: 0 }] },
+        AccountInfoInteger: () => b.account, AccountInfoString: () => b.server,
+        TimeLocal: () => b.now, GetTickCount64: () => b.tick, UninitializeReason: () => b.reason,
+        ArrayResize: (array, length) => { array.length = length; }, ArraySize: array => array.length,
+        MathFloor: Math.floor, MathCeil: Math.ceil, MathAbs: Math.abs, MathMax: Math.max, MathMin: Math.min,
+        MathIsValidNumber: Number.isFinite, NormalizeDouble: (v, d) => Number(v.toFixed(d)),
+        DoubleToString: (v, d) => v.toFixed(d), StringFormat: (...args) => args.join(' '), PrintFormat: () => {}, Print: () => {},
+        RRPlanInitialize: () => true, RRPlanTotalPercent: () => 100, RRPlanFinalR: () => 5, RRPlanClosesAll: () => true,
+        PositionsTotal: () => b.positions.length,
+        PositionGetTicket: index => { b.selected = b.positions[index]; return b.selected?.ticket ?? 0; },
+        PositionSelectByTicket: ticket => Boolean(b.selected = b.positions.find(p => p.ticket === ticket)),
+        PositionGetString: () => b.selected?.symbol,
+        PositionGetInteger: key => ({ POSITION_IDENTIFIER: b.selected?.id, POSITION_MAGIC: b.selected?.magic,
+            POSITION_TYPE: b.selected?.direction === 1 ? 'POSITION_TYPE_BUY' : 'POSITION_TYPE_SELL' })[key],
+        PositionGetDouble: key => ({ POSITION_VOLUME: b.selected?.volume, POSITION_PRICE_OPEN: b.selected?.entry,
+            POSITION_SL: b.selected?.sl, POSITION_TP: b.selected?.tp })[key],
+        SymbolInfoDouble: (symbol, key) => {
+            b.symbolReads.push({ symbol, key }); assert.ok(symbols[symbol], `actual symbol required, got ${symbol}`);
+            const p = symbols[symbol]; return ({ SYMBOL_VOLUME_STEP: p.step, SYMBOL_VOLUME_MIN: p.minimum,
+                SYMBOL_VOLUME_MAX: p.maximum, SYMBOL_TRADE_TICK_SIZE: p.tickSize, SYMBOL_POINT: p.point })[key];
+        },
+        SymbolInfoInteger: (symbol, key) => {
+            const p = symbols[symbol]; assert.ok(p, `actual symbol required, got ${symbol}`);
+            return ({ SYMBOL_DIGITS: p.digits, SYMBOL_FILLING_MODE: p.fill, SYMBOL_TRADE_EXEMODE: 'market',
+                SYMBOL_TRADE_STOPS_LEVEL: 0, SYMBOL_TRADE_FREEZE_LEVEL: 0 })[key];
+        },
+        SymbolInfoTick: (symbol, tick) => { const p = symbols[symbol]; Object.assign(tick, { bid: p.bid, ask: p.ask }); return p.quoteOK !== false; },
+        RRHistory: (id, set) => { const p = b.positions.find(p => p.id === id);
+            if (!p || p.historyOK === false) return false;
+            set({ opening_order: p.id + 10000, in_volume: p.initial ?? p.volume, mixed: false }); return true; },
+        OrderSelect: () => false, HistoryOrderSelect: () => true,
+        HistoryOrderGetDouble: (order, key) => key === 'ORDER_SL' ? b.positions.find(p => p.id + 10000 === order)?.sl : 0,
+        RRFileName: id => `${b.server}/${b.account}/${id}`,
+        FileIsExist: name => b.journals.has(name),
+        FileOpen: name => { const h = b.nextHandle++; b.handles.set(h, name);
+            if (!b.journals.has(name)) b.journals.set(name, null);
+            b.afterOpen?.(name); return h; },
+        FileSize: h => b.journals.get(b.handles.get(h)) ? 1 : 0,
+        FileClose: h => b.handles.delete(h),
+        RRSave: (h, s) => { b.journals.set(b.handles.get(h), structuredClone(s)); b.saves.push(structuredClone(s)); return true; },
+        RRLoad: (h, s) => { const stored = b.journals.get(b.handles.get(h)); if (!stored) return false; Object.assign(s, structuredClone(stored)); return true; },
+        ZeroMemory: value => { for (const key of Object.keys(value)) delete value[key]; Object.assign(value, {
+            stage: 0, pending: 0, pending_order: 0, sequence: 0, be_requested: 0, be_done: 0, last_request: 0, last_stop_request: 0,
+            target_r: Array(20).fill(0), target_percent: Array(20).fill(0), target_be: Array(20).fill(0) }); },
+        RGPositionExitLatched: id => b.risk.has(id), RMPositionExitActive: id => b.manual.has(id),
+        RRCanTrade: () => true, RRDefiniteReject: () => false,
+        RRResolvePending: (_h, s) => s.pending === 0,
+        RRRequestComment: s => `RR${s.identifier}-${s.sequence}`, RRNotice: () => {},
+        OrderCheck: () => true,
+        OrderSend: (request, result) => {
+            b.sends.push(structuredClone(request)); Object.assign(result, { order: 99999, deal: 0, retcode: 'TRADE_RETCODE_DONE' }); return true;
+        },
+    });
+    for (const name of ['RRTargetPrice', 'RRTargetReached', 'RRPartialLots', 'RRBETarget', 'RRSLProtectsBE']) vm.runInContext(extract(core, name), c);
+    for (const name of ['RRSnapshotExisting', 'RRWasExisting', 'RRValidateInputs', 'RRCapture', 'RRStateClosesAll',
+        'RRClose', 'RRUpdateStops', 'RRProcessMulti', 'RRProcess', 'RRSwitchCanSnapshot', 'RRManage']) vm.runInContext(extract(manager, name), c);
+    const add = (id, symbol = 'XAUUSD', overrides = {}) => {
+        const p = { id, ticket: id + 100, symbol, magic: 123, direction: symbol === 'XAUUSD' ? 1 : -1,
+            entry: symbol === 'XAUUSD' ? 2000 : 1.1, sl: symbol === 'XAUUSD' ? 1990 : 1.11,
+            volume: symbol === 'XAUUSD' ? 1 : 0.03, tp: 0, ...overrides };
+        b.positions.push(p); return p;
+    };
+    return { b, c, symbols, add, deals: () => b.sends.filter(r => r.action === 'TRADE_ACTION_DEAL') };
+}
+check('global manager uses each actual symbol for frozen risk, close price, lot step, fill policy and BE', () => {
+    const f = multiSymbolFixture(); f.add(1); f.add(2, 'EURUSD'); f.add(3, 'EURUSD', { magic: 999 });
+    f.c.RRManage('', 123);
+    const requests = f.deals().sort((a, b) => a.position - b.position);
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map(r => [r.symbol, r.volume, r.price, r.type_filling]), [
+        ['XAUUSD', 0.5, 2020, 'ORDER_FILLING_FOK'], ['EURUSD', 0.01, 1.08, 'ORDER_FILLING_IOC']]);
+    const gold = f.b.journals.get(f.c.RRFileName(1)), eur = f.b.journals.get(f.c.RRFileName(2));
+    assert.equal(gold.entry, 2000); assert.equal(gold.risk, 10); assert.equal(eur.entry, 1.1);
+    assert.ok(Math.abs(eur.risk - 0.01) < 1e-10);
+    assert.deepEqual(f.b.sends.filter(r => r.action === 'TRADE_ACTION_SLTP').map(r => [r.symbol, r.sl, r.tp]).sort(),
+        [['EURUSD', 1.1, 1.05], ['XAUUSD', 2000, 2050]]);
+    assert.equal(f.b.journals.has(f.c.RRFileName(3)), false); assert.equal(f.b.handles.size, 0);
+});
+check('nonempty selector retains symbol filtering in the global-capable manager', () => {
+    const f = multiSymbolFixture(); f.add(1); f.add(2, 'EURUSD'); f.c.RRManage('EURUSD', 123);
+    assert.deepEqual(f.deals().map(r => r.symbol), ['EURUSD']); assert.equal(f.b.journals.size, 1);
+});
+check('off-chart missing quotes skip that symbol while another symbol still reaches its target', () => {
+    const f = multiSymbolFixture(); f.add(1); f.add(2, 'EURUSD'); f.symbols.EURUSD.quoteOK = false;
+    f.c.RRManage('', 123); assert.deepEqual(f.deals().map(r => r.symbol), ['XAUUSD']);
+    assert.equal(f.b.journals.get(f.c.RRFileName(2)).stage, 0);
+});
+check('actual off-chart minimum lot prevents a rounded but too-small partial reduction', () => {
+    const f = multiSymbolFixture(); f.add(1); f.add(2, 'EURUSD'); f.symbols.EURUSD.minimum = 0.02;
+    f.c.RRManage('', 123); assert.deepEqual(f.deals().map(r => r.symbol), ['XAUUSD']);
+});
+check('manual exit ownership skips RR before creating its journal', () => {
+    const f = multiSymbolFixture(); f.add(1); f.b.manual.add(1); f.c.RRManage('', 123);
+    assert.equal(f.b.journals.size, 0); assert.equal(f.b.sends.length, 0);
+});
+check('manual exit registration between the first check and RR journal lock cannot reach a send', () => {
+    const f = multiSymbolFixture(); f.add(1); f.b.afterOpen = () => f.b.manual.add(1); f.c.RRManage('', 123);
+    assert.equal(f.b.sends.length, 0); assert.equal(f.b.saves.length, 0); assert.equal(f.b.handles.size, 0);
+});
+check('global manager retains existing persisted targets and execution state on subsequent passes', () => {
+    const f = multiSymbolFixture(); f.add(1); f.add(2, 'EURUSD'); f.c.RRManage('', 123);
+    const before = structuredClone([...f.b.journals]);
+    f.c.RRActivePlan.targets[0].multiple = 3; f.b.tick += 300; f.c.RRManage('', 123);
+    assert.deepEqual([...f.b.journals], before); assert.equal(f.deals().length, 2);
+});
+check('chart-symbol reinitialization preserves the cold-start exclusion boundary and unprocessed new fills', () => {
+    const f = multiSymbolFixture(); f.add(1); f.c.RRSnapshotExisting(); f.add(2, 'EURUSD');
+    f.b.reason = f.c.REASON_CHARTCHANGE; assert.equal(f.c.RRValidateInputs(), true);
+    assert.deepEqual(Array.from(f.c.RRExistingIDs), [1]); f.c.RRManage('', 123);
+    assert.equal(f.b.journals.has(f.c.RRFileName(1)), false);
+    assert.equal(f.b.journals.has(f.c.RRFileName(2)), true);
+});
+check('cold load and account changes still snapshot preexisting positions rather than adopting them', () => {
+    for (const mode of ['cold', 'account']) {
+        const f = multiSymbolFixture(); f.add(1); f.c.RRSnapshotExisting(); f.add(2, 'EURUSD');
+        f.b.reason = f.c.REASON_CHARTCHANGE;
+        if (mode === 'cold') f.c.RRHasSnapshot = false; else f.b.account = 22;
+        assert.equal(f.c.RRValidateInputs(), true); assert.deepEqual(Array.from(f.c.RRExistingIDs), [1, 2]);
+        f.c.RRManage('', 123); assert.equal(f.b.journals.size, 0);
+    }
+});
+check('switch snapshot preflight checks all new positions but permits pure pending orders and historical positions', () => {
+    const f = multiSymbolFixture(); f.b.orders.push({ ticket: 900, symbol: 'EURUSD' });
+    assert.equal(f.c.RRSwitchCanSnapshot(123, ''), true);
+    f.add(1); f.c.RRSnapshotExisting(); f.add(2, 'EURUSD');
+    assert.equal(f.c.RRSwitchCanSnapshot(123, ''), false);
+    f.c.RRManage('', 123); assert.equal(f.c.RRSwitchCanSnapshot(123, ''), true); assert.equal(f.b.handles.size, 0);
+});
+check('shared default-plan edit guard includes pending orders on every symbol', () => {
+    resetEnvironment({ orders: [{ ticket: 1, active: true, symbol: 'EURUSD', magic: 123 }] });
+    assert.equal(context.RRPlanCanEdit('', 123, ''), false);
+    assert.equal(context.RRPlanCanEdit('TEST', 123, ''), true);
+});
+check('shared default-plan edit guard includes off-chart new fills until their journal is frozen', () => {
+    resetEnvironment({ positions: [{ ticket: 100, id: 42, symbol: 'EURUSD', magic: 123 }] });
+    assert.equal(context.RRPlanCanEdit('', 123, ''), false);
+    assert.equal(context.RRPlanCanEdit('TEST', 123, ''), true);
+    env.journals['42'] = { valid: true, state: { magic: 123 } };
+    assert.equal(context.RRPlanCanEdit('', 123, ''), true);
+});
+check('global manager resumes old-Magic frozen journals while new captures keep current entry Magic', () => {
+    const f = multiSymbolFixture(); f.add(1); const old = f.add(2, 'EURUSD', { magic: 999 });
+    const frozen = {}; assert.equal(f.c.RRCapture(old.ticket, frozen), true);
+    f.b.journals.set(f.c.RRFileName(old.id), structuredClone(frozen));
+    f.add(3, 'EURUSD', { magic: 999 }); f.add(4, 'EURUSD', { magic: 0 });
+    f.c.RRManage('', 123);
+    assert.deepEqual(f.deals().map(r => [r.symbol, r.magic]).sort(), [['EURUSD', 999], ['XAUUSD', 123]]);
+    assert.equal(f.b.journals.has(f.c.RRFileName(3)), false); assert.equal(f.b.journals.has(f.c.RRFileName(4)), false);
+    const saved = f.b.journals.get(f.c.RRFileName(old.id));
+    assert.equal(saved.magic, 999); assert.equal(saved.entry, frozen.entry); assert.equal(saved.risk, frozen.risk);
+    assert.deepEqual(saved.target_r, frozen.target_r);
+});
+check('empty other-Magic journal never grants authority to capture an unrelated position', () => {
+    const f = multiSymbolFixture(); f.add(1, 'EURUSD', { magic: 999 }); f.b.journals.set(f.c.RRFileName(1), null);
+    f.c.RRManage('', 123);
+    assert.equal(f.b.sends.length, 0); assert.equal(f.b.saves.length, 0); assert.equal(f.b.journals.get(f.c.RRFileName(1)), null);
+});
+check('global resume requires the persisted journal Magic to match the actual position', () => {
+    const f = multiSymbolFixture(); const p = f.add(1, 'EURUSD', { magic: 999 }); const frozen = {};
+    assert.equal(f.c.RRCapture(p.ticket, frozen), true); frozen.magic = 123;
+    f.b.journals.set(f.c.RRFileName(1), frozen); f.c.RRManage('', 123);
+    assert.equal(f.b.sends.length, 0); assert.equal(f.b.saves.length, 0);
+});
+check('nonempty symbol selector retains original Magic scope even for an old-Magic valid journal', () => {
+    const f = multiSymbolFixture(); const p = f.add(1, 'EURUSD', { magic: 999 }); const frozen = {};
+    assert.equal(f.c.RRCapture(p.ticket, frozen), true); f.b.journals.set(f.c.RRFileName(1), frozen);
+    f.c.RRManage('EURUSD', 123); assert.equal(f.b.sends.length, 0); assert.equal(f.b.saves.length, 0);
+});
+check('zero entry Magic cannot enroll a new manual position even when the panel setting matches', () => {
+    for (const emptyJournal of [false, true]) {
+        const f = multiSymbolFixture(); f.add(1, 'EURUSD', { magic: 0 });
+        if (emptyJournal) f.b.journals.set(f.c.RRFileName(1), null);
+        f.c.RRManage('', 0); assert.equal(f.b.sends.length, 0); assert.equal(f.b.saves.length, 0);
+        assert.equal(f.b.journals.has(f.c.RRFileName(1)), emptyJournal);
+    }
+});
+
+process.stdout.write(`\n${passed} manager tests passed against production management, capture, execution and reinitialization functions.\n`);
 process.stdout.write('Scope: simulated MT5 boundaries; no real trading requests, terminal compilation or journal IO.\n');

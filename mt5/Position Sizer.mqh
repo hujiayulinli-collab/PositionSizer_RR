@@ -5,6 +5,7 @@
 //+------------------------------------------------------------------+
 #include "Defines.mqh"
 #include <ChartObjects\ChartObjectsTxtControls.mqh>
+#include <Controls\ComboBox.mqh>
 
 // Draft BE flags belong to the RR plan editor, not the generic panel layout.
 // Skipping these controls in the layout stream also keeps old layout files
@@ -14,6 +15,23 @@ class CRRPlanCheckBox : public CCheckBox
 public:
     virtual bool Save(const int file_handle) { return true; }
     virtual bool Load(const int file_handle) { return true; }
+};
+
+// Selections are transient UI state and must not change the existing layout stream.
+class CRRPanelComboBox : public CComboBox
+{
+public:
+    virtual bool Save(const int file_handle) { return true; }
+    virtual bool Load(const int file_handle) { return true; }
+    bool Expanded()
+    {
+        for (int i = 0; i < ControlsTotal(); i++)
+        {
+            CWnd *child = Control(i);
+            if (child != NULL && child.Name() == Name() + "List") return child.IsVisible();
+        }
+        return false;
+    }
 };
 
 struct RGPanelDraft
@@ -37,8 +55,9 @@ private:
     CHorizontalRadioGroup m_RgpIncludeOrders, m_RgpIncludeSymbols, m_RgpIncludeDirections, m_RgpMarginUtilizationBase;
 
     // The editor keeps its own text draft; only Save can replace RRActivePlan.
-    CButton          m_BtnTabRR, m_BtnRRAdd, m_BtnRRSave, m_BtnRRReset, m_BtnRRPrevious, m_BtnRRNext, m_BtnRRNewPlan, m_BtnRRPosition, m_BtnRRDelete[5];
-    CEdit            m_EdtRRMultiple[5], m_EdtRRPercent[5];
+    CButton          m_BtnTabRR, m_BtnRRAdd, m_BtnRRSave, m_BtnRRReset, m_BtnRRPrevious, m_BtnRRNext, m_BtnRRNewPlan, m_BtnRRPosition, m_BtnRRManualClose, m_BtnRRDelete[5];
+    CEdit            m_EdtRRMultiple[5], m_EdtRRPercent[5], m_EdtRRClosePercent;
+    CRRPanelComboBox m_CmbRRPosition, m_CmbRRClosePercent;
     CRRPlanCheckBox  m_ChkRRBreakEven[5];
     CLabel           m_LblRRNumber[5], m_LblRRPrice[5], m_LblRRHeadingR, m_LblRRHeadingPercent, m_LblRRHeadingBE, m_LblRRMode, m_LblRRInfo, m_LblRRBEInfo, m_LblRRPositionInfo, m_LblRRPage, m_LblRRStatus, m_LblRRStatus2;
     int              m_rr_page, m_rr_count, m_rr_expected_stage, m_rr_live_stage;
@@ -49,6 +68,18 @@ private:
     RRPlan           m_rr_loaded_plan;
     string           m_rr_multiple[RR_MAX_TARGETS], m_rr_percent[RR_MAX_TARGETS];
     bool             m_rr_be[RR_MAX_TARGETS];
+    bool             m_rr_has_plan;
+    long             m_rr_position_magic;
+    string           m_rr_position_symbol, m_rr_position_choices;
+    CLabel           m_LblRRManualInfo;
+
+    CRRPanelComboBox m_CmbTradeSymbol;
+    CEdit            m_EdtTradeSymbol;
+    CButton          m_BtnSwitchSymbol, m_BtnCancelReverse;
+    CRRPlanCheckBox   m_ChkCloseOpposite;
+    CLabel           m_LblSymbolStatus, m_LblReverseStatus;
+    string           m_trade_symbol_choices, m_trade_view_symbol, m_trade_symbol_selection;
+    ulong            m_trade_controls_refresh;
 
     CButton          m_BtnTabGuard, m_BtnGuardScope, m_BtnGuardSave, m_BtnGuardReset;
     CEdit            m_EdtGuardSingle, m_EdtGuardDaily, m_EdtGuardTradeSound, m_EdtGuardLossSound;
@@ -163,6 +194,8 @@ public:
             double   DPIScale() {return m_DPIScale;}
             void     RefreshRRLiveStatus(); // Refreshes live labels without replacing the edit draft.
             void     RefreshGuardLiveStatus();
+            void     RefreshTradeControlStatus();
+            bool     HasRRDraftChanges();
             // Remember the panel's location to have the same location for minimized and maximized states.
             int      remember_top, remember_left;
 private:
@@ -191,6 +224,11 @@ private:
     void             UpdateRRModeLabels();
     void             OnClickBtnRRNewPlan();
     void             OnClickBtnRRPosition();
+    void             OnChangeRRPosition();
+    void             RefreshRRPositionChoices();
+    bool             SelectRRPanelPosition(const ulong identifier);
+    void             OnChangeRRClosePercent();
+    void             OnClickRRManualClose();
     void             SetRRStatus(const string text, const bool error = false);
     void             OnClickBtnTabRR();
     void             OnClickBtnRRAdd();
@@ -212,6 +250,13 @@ private:
     void             OnClickBtnGuardSave();
     void             OnClickBtnGuardReset();
     void             OnGuardDraftChanged();
+    bool             ComboBoxCreate(CPanelList *list, CRRPanelComboBox &combo, int x1, int y1, int x2, int y2, string name);
+    bool             CreateTradeControlOptions();
+    void             RefreshTradeSymbolChoices();
+    void             OnChangeTradeSymbol();
+    void             OnClickSwitchSymbol();
+    void             OnChangeCloseOpposite();
+    void             OnClickCancelReverse();
     virtual bool     CreateObjects();
     virtual bool     InitObjects();
     virtual bool     DisplayValues(); // Updates values in the panel.
@@ -303,6 +348,7 @@ private:
 
 #include "RRPlanPanel.mqh"
 #include "RRGuardPanel.mqh"
+#include "RRTradePanel.mqh"
 
 // Event Map
 EVENT_MAP_BEGIN(CPositionSizeCalculator)
@@ -324,6 +370,13 @@ ON_EVENT(ON_CLICK, m_BtnRRPrevious, OnClickBtnRRPrevious)
 ON_EVENT(ON_CLICK, m_BtnRRNext, OnClickBtnRRNext)
 ON_EVENT(ON_CLICK, m_BtnRRNewPlan, OnClickBtnRRNewPlan)
 ON_EVENT(ON_CLICK, m_BtnRRPosition, OnClickBtnRRPosition)
+ON_EVENT(ON_CHANGE, m_CmbRRPosition, OnChangeRRPosition)
+ON_EVENT(ON_CHANGE, m_CmbRRClosePercent, OnChangeRRClosePercent)
+ON_EVENT(ON_CLICK, m_BtnRRManualClose, OnClickRRManualClose)
+ON_EVENT(ON_CHANGE, m_CmbTradeSymbol, OnChangeTradeSymbol)
+ON_EVENT(ON_CLICK, m_BtnSwitchSymbol, OnClickSwitchSymbol)
+ON_EVENT(ON_CHANGE, m_ChkCloseOpposite, OnChangeCloseOpposite)
+ON_EVENT(ON_CLICK, m_BtnCancelReverse, OnClickCancelReverse)
 for (int rr_row = 0; rr_row < 5; rr_row++)
 {
     if ((id == ON_CLICK + CHARTEVENT_CUSTOM) && (lparam == m_BtnRRDelete[rr_row].Id()))
@@ -483,6 +536,14 @@ void CPositionSizeCalculator::InitVariables()
     m_rr_visible = false;
     m_rr_position_id = 0;
     m_rr_last_refresh = 0;
+    m_rr_has_plan = true;
+    m_rr_position_magic = 0;
+    m_rr_position_symbol = "";
+    m_rr_position_choices = "";
+    m_trade_symbol_choices = "";
+    m_trade_view_symbol = "";
+    m_trade_symbol_selection = "";
+    m_trade_controls_refresh = 0;
     m_rr_expected_checksum = 0;
     m_rr_expected_stage = 0;
     m_rr_live_stage = 0;
@@ -1497,6 +1558,7 @@ bool CPositionSizeCalculator::CreateObjects()
 
     if (!CreateRRControls()) return false;
     if (!CreateGuardControls()) return false;
+    if (!CreateTradeControlOptions()) return false;
 
     // All tab lists and controls now exist. InitObjects() may itself cause
     // layout callbacks, so enable those callbacks before initializing values.
@@ -1966,7 +2028,10 @@ void CPositionSizeCalculator::MoveAndResize()
         ref_point = m_LblSwapsPerPSYearly.Top();
         break;
     case TradingTab:
-        ref_point = m_ChkAskForConfirmation.Top();
+        m_ChkCloseOpposite.Move(m_ChkCloseOpposite.Left(), m_ChkAskForConfirmation.Top() + col_height);
+        m_LblReverseStatus.Move(m_LblReverseStatus.Left(), m_ChkAskForConfirmation.Top() + 2 * col_height);
+        m_BtnCancelReverse.Move(m_BtnCancelReverse.Left(), m_LblReverseStatus.Top());
+        ref_point = m_LblReverseStatus.Top();
         break;
     case RRTargetsTab:
         ref_point = m_LblRRStatus2.Top();
@@ -2644,6 +2709,10 @@ void CPositionSizeCalculator::HideMain()
 
 void CPositionSizeCalculator::ShowMain()
 {
+    m_CmbTradeSymbol.Show();
+    m_EdtTradeSymbol.Show();
+    m_BtnSwitchSymbol.Show();
+    m_LblSymbolStatus.Show();
     m_BtnTabMain.ColorBackground(CONTROLS_BUTTON_COLOR_ENABLE);
     if ((AdditionalTradeButtons == ADDITIONAL_TRADE_BUTTONS_MAIN) || (AdditionalTradeButtons == ADDITIONAL_TRADE_BUTTONS_BOTH))
     {

@@ -132,18 +132,22 @@ void RRPruneTargetRows(const string owner_prefix, const int count)
 void RRRefreshTargetLines(const string symbol, const long magic, const double preview_entry,
                           const double preview_stop, const int preview_direction, const bool force = false)
 {
+    // Unlike the account manager, chart annotations never accept a wildcard:
+    // another symbol's price has no meaning on this chart's vertical axis.
+    if (symbol == "" || symbol != _Symbol) { RRDeleteTargetLines(); return; }
     if (!force && GetTickCount64() - RRLastLineRefresh < 500) return;
     RRLastLineRefresh = GetTickCount64();
     ArrayResize(RRLabelRows, 0);
-    if (symbol != _Symbol) { RRDeleteTargetLines(); return; }
     double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
     int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+    if (!MathIsValidNumber(tick_size) || tick_size <= 0 || digits < 0) { RRDeleteTargetLines(); return; }
     string retained[];
     int owners = 0, ordinal = 0;
     for (int pos = PositionsTotal() - 1; pos >= 0; pos--)
     {
         ulong ticket = PositionGetTicket(pos);
-        if (ticket == 0 || PositionGetString(POSITION_SYMBOL) != symbol || PositionGetInteger(POSITION_MAGIC) != magic) continue;
+        if (ticket == 0 || PositionGetString(POSITION_SYMBOL) != symbol) continue;
+        long position_magic = PositionGetInteger(POSITION_MAGIC);
         ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
         if (!FileIsExist(RRFileName(id))) continue;
         string prefix = RRLinePrefix + IntegerToString(id) + "_";
@@ -153,10 +157,10 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
         string error;
         // A temporarily busy journal keeps its last annotations, rather than
         // making existing targets blink or displaying new-entry previews.
-        if (!RRReadManagedPosition(symbol, magic, id, state, ticket, error)) continue;
+        if (!RRReadManagedPosition(symbol, position_magic, id, state, ticket, error)) continue;
         RRPlan plan;
         RRStatePlan(state, plan);
-        if (!PositionSelectByTicket(ticket)) continue;
+        if (!PositionSelectByTicket(ticket) || PositionGetString(POSITION_SYMBOL) != symbol) continue;
         double tp = PositionGetDouble(POSITION_TP);
         bool closes_all = RRStateClosesAll(state);
         double final_price = closes_all ? RRTargetPrice(state.direction, state.entry, state.risk, state.final_r, tick_size, digits) : 0;

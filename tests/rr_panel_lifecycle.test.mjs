@@ -299,6 +299,8 @@ function deinitFixture(initialized, hasPanel, layoutExists = true) {
         ...Object.fromEntries(constants.map(value => [value, value])),
         RRPanelInitSucceeded: initialized, DeinitializationReason: -1, POINTER_DYNAMIC: 'dynamic', NULL: null,
         RRShutdown: () => events.push('rr-shutdown'), EventKillTimer: () => events.push('timer-stop'),
+        RCCancelReverse: () => events.push('cancel-reverse-entry'),
+        RCCaptureCommon: () => events.push('capture-common-settings'),
         RRDeleteTargetLines: () => events.push('clear-rr-targets'),
         RGDeleteStatus: () => events.push('clear-guard-status'),
         CheckPointer: value => value ? 'dynamic' : 'invalid',
@@ -325,12 +327,12 @@ function deinitFixture(initialized, hasPanel, layoutExists = true) {
 }
 check('actual init-failed deinit destroys only partial panel and never saves settings', () => {
     const f = deinitFixture(false, true); f.context.OnDeinit('REASON_INITFAILED');
-    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'timer-stop', 'destroy-panel', 'delete-panel', 'delete-prefix:12345', 'redraw']);
+    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'cancel-reverse-entry', 'timer-stop', 'destroy-panel', 'delete-panel', 'delete-prefix:12345', 'redraw']);
     assert.equal(f.context.ExtDialog, null); assert.equal(f.context.RRPanelInitSucceeded, false);
 });
 check('failure before allocation deinitializes without dereferencing a null panel', () => {
     const f = deinitFixture(false, false); f.context.OnDeinit('REASON_INITFAILED');
-    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'timer-stop', 'redraw']);
+    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'cancel-reverse-entry', 'timer-stop', 'redraw']);
 });
 check('unfinished init skips saving even with a different deinit reason', () => {
     const f = deinitFixture(false, true); f.context.OnDeinit('REASON_PARAMETERS');
@@ -346,6 +348,36 @@ check('successful chart change preserves panel object for reuse', () => {
     const f = deinitFixture(true, true); f.context.OnDeinit('REASON_CHARTCHANGE');
     assert.ok(f.context.ExtDialog); assert.ok(!f.events.includes('destroy-panel'));
     assert.ok(!f.events.includes('save-settings')); assert.equal(f.context.OldSymbol, 'TEST');
+    assert.ok(f.events.includes('capture-common-settings'));
+    assert.ok(f.events.indexOf('cancel-reverse-entry') < f.events.indexOf('capture-common-settings'));
+});
+check('failed initialization cannot capture half-loaded account common settings', () => {
+    const f = deinitFixture(false, true); f.context.OnDeinit('REASON_CHARTCHANGE');
+    assert.ok(!f.events.includes('capture-common-settings')); assert.ok(f.events.includes('cancel-reverse-entry'));
+});
+check('symbol prices load before common settings and final controls refresh follows layout loading', () => {
+    const { body } = globalFunction(entrySource, 'OnInit');
+    assert.ok(body.indexOf('ExtDialog.LoadSettingsFromDisk()') < body.indexOf('RCApplyCommon()'));
+    assert.match(body, /RCApplyCommon\(\)\)\s*is_InitControlsValues_required = true;/);
+    assert.ok(body.lastIndexOf('ExtDialog.IniFileLoad();') < body.indexOf('if (is_InitControlsValues_required) ExtDialog.InitControlsValues();'));
+    const layout = /virtual\s+void\s+IniFileLoad\(\)\s*\{([^}]*)\}/.exec(production)[1];
+    assert.ok(layout.indexOf('CAppDialog::IniFileLoad();') < layout.indexOf('InitObjects();'));
+    assert.ok(extract(production, 'InitObjects').body.includes('InitControlsValues();'));
+});
+check('actual controls initialization overwrites stale layout display with applied risk and magic values', () => {
+    const { body } = extract(production, 'InitControlsValues');
+    const statements = ['m_EdtRiskPIn', 'm_EdtRiskMIn', 'm_EdtMagicNumber'].map(name => {
+        const statement = new RegExp(`${name}\\.Text\\([^\\n]+;`).exec(body);
+        assert.ok(statement); return statement[0];
+    });
+    const texts = new Map(); const saved = { Risk: 0.7, MoneyRisk: 250, MagicNumber: 9988 };
+    const s = { sets: saved, AccountCurrencyDigits: 2, DoubleToString: (n, places) => n.toFixed(places), IntegerToString: String };
+    for (const name of ['m_EdtRiskPIn', 'm_EdtRiskMIn', 'm_EdtMagicNumber']) s[name] = { Text: value => texts.set(name, value) };
+    texts.set('m_EdtMagicNumber', '123'); texts.set('m_EdtRiskPIn', '5.00'); texts.set('m_EdtRiskMIn', '9000.00');
+    vm.runInNewContext(statements.join('\n'), s);
+    assert.equal(texts.get('m_EdtRiskPIn'), '0.70'); assert.equal(texts.get('m_EdtRiskMIn'), '250.00'); assert.equal(texts.get('m_EdtMagicNumber'), '9988');
+    assert.deepEqual(saved, { Risk: 0.7, MoneyRisk: 250, MagicNumber: 9988 });
+    assert.doesNotMatch(body, /sets\.(?:Risk|MoneyRisk|MagicNumber)\s*=/);
 });
 check('normal removal skips missing layout file without warning', () => {
     const f = deinitFixture(true, true, false); f.context.OnDeinit('REASON_REMOVE');

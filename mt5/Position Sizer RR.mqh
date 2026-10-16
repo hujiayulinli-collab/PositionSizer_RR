@@ -3,6 +3,9 @@
 #define POSITION_SIZER_RR_MQH
 #include "RRCore.mqh"
 
+// Implemented by the manual-close journal module included after this engine.
+bool RMPositionExitActive(const ulong id);
+
 input group "分仓止盈 / RR exit manager"
 input(name="启用分仓止盈") bool RR_Enable = true;
 input(name="首次方案：第一目标 R") double RR_FirstTarget = 2.0;
@@ -142,6 +145,7 @@ void RRToLegacy(const RRState &s, RRLegacyState &legacy)
 }
 
 ulong RRExistingIDs[];
+bool RRHasSnapshot = false;
 long RRAccount = 0;
 string RRServer = "";
 ulong RRLastRun = 0;
@@ -194,11 +198,17 @@ void RRSnapshotExisting()
             RRExistingIDs[count++] = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
         }
     ArrayResize(RRExistingIDs, count);
+    RRHasSnapshot = true;
 }
 
 bool RRValidateInputs()
 {
-    RRSnapshotExisting();
+    // MT5 retains EA globals for symbol/timeframe changes. Preserve the cold
+    // start boundary so a new, not-yet-captured fill stays eligible afterwards.
+    // A cold load or different account still excludes pre-existing positions.
+    if (!RRHasSnapshot || UninitializeReason() != REASON_CHARTCHANGE
+        || RRAccount != AccountInfoInteger(ACCOUNT_LOGIN) || RRServer != AccountInfoString(ACCOUNT_SERVER))
+        RRSnapshotExisting();
     string error;
     if (!RRPlanInitialize(RR_FirstTarget, RR_ClosePercent, RR_FinalTarget, RR_MoveToBE, error))
     {
@@ -341,7 +351,10 @@ bool RRCapture(const ulong ticket, RRState &s)
     if (!PositionSelectByTicket(ticket)) return false;
     double entry = PositionGetDouble(POSITION_PRICE_OPEN);
     double volume = PositionGetDouble(POSITION_VOLUME);
-    double step = SymbolInfoDouble(PositionGetString(POSITION_SYMBOL), SYMBOL_VOLUME_STEP);
+    string position_symbol = PositionGetString(POSITION_SYMBOL);
+    double step = SymbolInfoDouble(position_symbol, SYMBOL_VOLUME_STEP);
+    if (position_symbol == "" || !MathIsValidNumber(step) || step <= 0
+        || !MathIsValidNumber(entry) || entry <= 0 || !MathIsValidNumber(volume) || volume <= 0) return false;
     int direction = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 1 : -1);
     // Market execution can attach SL after the deal. Only for a newly observed
     // position may the current SL supply the initial risk if the order lacks it.
@@ -693,7 +706,7 @@ bool RRSelectManagedPosition(const string symbol, const long magic, const ulong 
     for (int i = PositionsTotal() - 1; i >= 0; i--)
     {
         ulong candidate = PositionGetTicket(i);
-        if (candidate > 0 && PositionGetString(POSITION_SYMBOL) == symbol
+        if (candidate > 0 && (symbol == "" || PositionGetString(POSITION_SYMBOL) == symbol)
             && PositionGetInteger(POSITION_MAGIC) == magic && (ulong)PositionGetInteger(POSITION_IDENTIFIER) == id)
         {
             ticket = candidate;
@@ -733,7 +746,7 @@ bool RRReadManagedPosition(const string symbol, const long magic, const ulong id
     error = "";
     ZeroMemory(s);
     if (!RRSelectManagedPosition(symbol, magic, id, ticket))
-    { error = "该持仓已平仓，或不属于当前品种和 MagicNumber。"; return false; }
+    { error = "该持仓已平仓，或不属于所选品种和 MagicNumber。"; return false; }
     string filename = RRFileName(id);
     if (!FileIsExist(filename))
     { error = "该持仓没有已保存的 RR 记录，无法读取或编辑。"; return false; }
@@ -757,7 +770,7 @@ ulong RRNextManagedPosition(const string symbol, const long magic, const ulong a
     for (int i = PositionsTotal() - 1; i >= 0; i--)
     {
         ulong ticket = PositionGetTicket(i);
-        if (ticket == 0 || PositionGetString(POSITION_SYMBOL) != symbol || PositionGetInteger(POSITION_MAGIC) != magic) continue;
+        if (ticket == 0 || (symbol != "" && PositionGetString(POSITION_SYMBOL) != symbol) || PositionGetInteger(POSITION_MAGIC) != magic) continue;
         ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
         if (id <= after_id || (next != 0 && id >= next)) continue;
         RRState s;
@@ -886,7 +899,12 @@ bool RRApplyPositionPlan(const string symbol, const long magic, const ulong id, 
     error = "";
     ulong ticket;
     if (!RRSelectManagedPosition(symbol, magic, id, ticket))
-    { error = "该持仓已平仓，或不属于当前品种和 MagicNumber。"; return false; }
+    { error = "该持仓已平仓，或不属于所选品种和 MagicNumber。"; return false; }
+    // An empty selector means all symbols. Execution and validation always use
+    // the selected position's real symbol, never the chart's prices or rules.
+    string position_symbol = PositionGetString(POSITION_SYMBOL);
+    if (RGPositionExitLatched(id) || RMPositionExitActive(id))
+    { error = "该持仓正在执行亏损保护或手动平仓，暂不能修改止盈方案。"; return false; }
     string filename = RRFileName(id);
     if (!FileIsExist(filename))
     { error = "该持仓没有 RR 记录，不能通过编辑功能接管。"; return false; }
@@ -897,9 +915,11 @@ bool RRApplyPositionPlan(const string symbol, const long magic, const ulong id, 
     { error = "持仓记录正被其他图表使用或无法写入，请稍候重试。"; return false; }
     RRState s;
     bool saved = false;
-    if (!RRLoad(handle, s, id) || s.magic != magic)
+    if (RGPositionExitLatched(id) || RMPositionExitActive(id))
+        error = "该持仓正在执行亏损保护或手动平仓，暂不能修改止盈方案。";
+    else if (!RRLoad(handle, s, id) || s.magic != magic)
         error = "持仓记录损坏或不匹配，不能保存。";
-    else saved = RRApplyPositionPlanLocked(handle, s, ticket, symbol, plan, expected_plan_checksum, expected_stage, error);
+    else saved = RRApplyPositionPlanLocked(handle, s, ticket, position_symbol, plan, expected_plan_checksum, expected_stage, error);
     FileClose(handle);
     return saved;
 }
@@ -912,16 +932,16 @@ bool RRPlanCanEdit(const string symbol, const long magic, string &error)
     for (int i = OrdersTotal() - 1; i >= 0; i--)
     {
         ulong order = OrderGetTicket(i);
-        if (order > 0 && OrderGetString(ORDER_SYMBOL) == symbol && OrderGetInteger(ORDER_MAGIC) == magic)
+        if (order > 0 && (symbol == "" || OrderGetString(ORDER_SYMBOL) == symbol) && OrderGetInteger(ORDER_MAGIC) == magic)
         {
-            error = "该品种存在本 EA 未成交订单，请先等待成交或撤销订单后保存止盈方案。";
+            error = "所选品种范围存在本 EA 未成交订单，请先等待成交或撤销订单后保存止盈方案。";
             return false;
         }
     }
     for (int i = PositionsTotal() - 1; i >= 0; i--)
     {
         ulong ticket = PositionGetTicket(i);
-        if (ticket == 0 || PositionGetString(POSITION_SYMBOL) != symbol || PositionGetInteger(POSITION_MAGIC) != magic) continue;
+        if (ticket == 0 || (symbol != "" && PositionGetString(POSITION_SYMBOL) != symbol) || PositionGetInteger(POSITION_MAGIC) != magic) continue;
         ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
         string filename = RRFileName(id);
         if (!FileIsExist(filename))
@@ -948,6 +968,33 @@ bool RRPlanCanEdit(const string symbol, const long magic, string &error)
     return true;
 }
 
+// Optional conservative preflight before a reinitialization that may discard
+// the existing-position boundary. Pure pending orders are allowed: no position
+// exists yet to misclassify as historical. This function never adopts a trade.
+bool RRSwitchCanSnapshot(const long magic, string &error)
+{
+    error = "";
+    for (int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if (ticket == 0 || PositionGetInteger(POSITION_MAGIC) != magic) continue;
+        ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
+        if (RRWasExisting(id)) continue;
+        string filename = RRFileName(id);
+        if (!FileIsExist(filename))
+        { error = "新持仓尚未冻结止盈方案，请稍候再切换交易品种。"; return false; }
+        int handle = FileOpen(filename, FILE_READ | FILE_BIN);
+        if (handle == INVALID_HANDLE)
+        { error = "新持仓的止盈记录暂不可读，请稍候再切换交易品种。"; return false; }
+        RRState s;
+        bool valid = RRLoad(handle, s, id);
+        FileClose(handle);
+        if (!valid || s.magic != magic)
+        { error = "新持仓的止盈方案尚未完整保存，请先检查专家日志。"; return false; }
+    }
+    return true;
+}
+
 
 void RRManage(const string symbol, const long magic)
 {
@@ -961,11 +1008,18 @@ void RRManage(const string symbol, const long magic)
     for (int i = PositionsTotal() - 1; i >= 0; i--)
     {
         ulong ticket = PositionGetTicket(i);
-        if (ticket == 0 || PositionGetString(POSITION_SYMBOL) != symbol || PositionGetInteger(POSITION_MAGIC) != magic) continue;
+        if (ticket == 0 || (symbol != "" && PositionGetString(POSITION_SYMBOL) != symbol)) continue;
+        string position_symbol = PositionGetString(POSITION_SYMBOL);
+        long position_magic = PositionGetInteger(POSITION_MAGIC);
+        if (symbol != "" && position_magic != magic) continue;
         ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
         string filename = RRFileName(id);
-        if (!FileIsExist(filename) && RRWasExisting(id)) continue;
+        // Global management resumes every authentic existing RR journal,
+        // including a former entry Magic. Only today's selected entry Magic
+        // may enroll a new position; unrelated/manual trades remain untouched.
+        if (!FileIsExist(filename) && (magic <= 0 || position_magic != magic || RRWasExisting(id))) continue;
         if (RGPositionExitLatched(id)) continue; // Money-stop exits own this position until fully closed.
+        if (RMPositionExitActive(id)) continue; // Manual closes own their unresolved volume until confirmed.
         int handle = FileOpen(filename, FILE_READ | FILE_WRITE | FILE_BIN);
         if (handle == INVALID_HANDLE)
         {
@@ -975,18 +1029,19 @@ void RRManage(const string symbol, const long magic)
         // Recheck while holding the journal lock: another chart can latch a
         // money stop after the first check but before this first RR file exists.
         if (RGPositionExitLatched(id)) { FileClose(handle); continue; }
+        if (RMPositionExitActive(id)) { FileClose(handle); continue; }
         RRState s;
         bool ready = false;
         if (FileSize(handle) == 0)
         {
-            if (RRCapture(ticket, s)) ready = RRSave(handle, s);
+            if (magic > 0 && position_magic == magic && RRCapture(ticket, s)) ready = RRSave(handle, s);
         }
         else
         {
             ready = RRLoad(handle, s, id);
             if (!ready) RRNotice("RR 状态文件损坏或版本不兼容；已暂停该仓位，切勿删除文件后让 EA 重复接管。");
         }
-        if (ready && s.magic == magic) RRProcess(handle, s, ticket, symbol);
+        if (ready && s.magic == position_magic) RRProcess(handle, s, ticket, position_symbol);
         FileClose(handle);
     }
 }

@@ -9,10 +9,28 @@ bool CPositionSizeCalculator::CreateRRControls()
     if (!LabelCreate(RRTabList, m_LblRRMode, x, y, right, y + h, "m_LblRRMode", "新仓方案")) return false;
     y += (int)MathRound(22 * m_DPIScale);
     if (!ButtonCreate(RRTabList, m_BtnRRNewPlan, x, y, x + (int)MathRound(112 * m_DPIScale), y + h, "m_BtnRRNewPlan", "新仓方案")) return false;
-    if (!ButtonCreate(RRTabList, m_BtnRRPosition, x + (int)MathRound(120 * m_DPIScale), y, right, y + h, "m_BtnRRPosition", "选择 / 下一持仓")) return false;
+    if (!ButtonCreate(RRTabList, m_BtnRRPosition, x + (int)MathRound(120 * m_DPIScale), y, right, y + h, "m_BtnRRPosition", "刷新持仓列表")) return false;
     m_BtnRRNewPlan.FontSize(9);
     m_BtnRRPosition.FontSize(9);
     y = (int)MathRound(87 * m_DPIScale);
+    if (!ComboBoxCreate(RRTabList, m_CmbRRPosition, x, y, right, y + h, "m_CmbRRPosition")) return false;
+    m_CmbRRPosition.AddItem("选择持仓（整个账户）", 0);
+    m_CmbRRPosition.Select(0);
+    y += (int)MathRound(27 * m_DPIScale);
+    if (!ComboBoxCreate(RRTabList, m_CmbRRClosePercent, x, y, x + (int)MathRound(85 * m_DPIScale), y + h, "m_CmbRRClosePercent")) return false;
+    m_CmbRRClosePercent.AddItem("快捷比例", 0);
+    m_CmbRRClosePercent.AddItem("25%", 25);
+    m_CmbRRClosePercent.AddItem("50%", 50);
+    m_CmbRRClosePercent.AddItem("75%", 75);
+    m_CmbRRClosePercent.AddItem("100%", 100);
+    m_CmbRRClosePercent.Select(0);
+    if (!EditCreate(RRTabList, m_EdtRRClosePercent, x + (int)MathRound(93 * m_DPIScale), y, x + (int)MathRound(157 * m_DPIScale), y + h, "m_EdtRRClosePercent", "50", "平掉点击时剩余仓位的百分比；可输入自定义比例")) return false;
+    if (!ButtonCreate(RRTabList, m_BtnRRManualClose, x + (int)MathRound(170 * m_DPIScale), y, right, y + h, "m_BtnRRManualClose", "按比例平仓 (%)")) return false;
+    m_BtnRRManualClose.FontSize(9);
+    y += (int)MathRound(24 * m_DPIScale);
+    if (!LabelCreate(RRTabList, m_LblRRManualInfo, x, y, right, y + h, "m_LblRRManualInfo", "手动平仓：按当前余仓；下方目标按初始仓位。")) return false;
+    m_LblRRManualInfo.FontSize(9);
+    y = (int)MathRound(166 * m_DPIScale);
     if (!LabelCreate(RRTabList, m_LblRRInfo, x, y, right, y + h, "m_LblRRInfo", "平仓比例按初始仓位，未安排比例继续保留。")) return false;
     y += (int)MathRound(21 * m_DPIScale);
     if (!LabelCreate(RRTabList, m_LblRRBEInfo, x, y, right, y + h, "m_LblRRBEInfo", "BE = 目标触发时把止损移至开仓价。")) return false;
@@ -22,7 +40,7 @@ bool CPositionSizeCalculator::CreateRRControls()
     m_LblRRInfo.FontSize(9);
     m_LblRRBEInfo.FontSize(9);
     m_LblRRPositionInfo.FontSize(9);
-    y = (int)MathRound(153 * m_DPIScale);
+    y = (int)MathRound(232 * m_DPIScale);
     int r_x = x + (int)MathRound(29 * m_DPIScale);
     int p_x = x + (int)MathRound(105 * m_DPIScale);
     int b_x = x + (int)MathRound(185 * m_DPIScale);
@@ -36,7 +54,7 @@ bool CPositionSizeCalculator::CreateRRControls()
     m_LblRRHeadingBE.FontSize(9);
     for (int row = 0; row < 5; row++)
     {
-        y = (int)MathRound((179 + row * 44) * m_DPIScale);
+        y = (int)MathRound((258 + row * 44) * m_DPIScale);
         string suffix = IntegerToString(row);
         if (!LabelCreate(RRTabList, m_LblRRNumber[row], x, y, r_x, y + h, "m_LblRRNumber" + suffix, "")) return false;
         if (!EditCreate(RRTabList, m_EdtRRMultiple[row], r_x, y, r_x + edit_w, y + h, "m_EdtRRMultiple" + suffix, "", "目标距离 = 初始止损距离 × R")) return false;
@@ -50,7 +68,7 @@ bool CPositionSizeCalculator::CreateRRControls()
         m_BtnRRDelete[row].FontSize(9);
         m_LblRRPrice[row].FontSize(9);
     }
-    y = (int)MathRound(403 * m_DPIScale);
+    y = (int)MathRound(482 * m_DPIScale);
     if (!ButtonCreate(RRTabList, m_BtnRRPrevious, x, y, x + (int)MathRound(52 * m_DPIScale), y + h, "m_BtnRRPrevious", "上一页")) return false;
     if (!LabelCreate(RRTabList, m_LblRRPage, x + (int)MathRound(59 * m_DPIScale), y, x + (int)MathRound(138 * m_DPIScale), y + h, "m_LblRRPage", "")) return false;
     if (!ButtonCreate(RRTabList, m_BtnRRNext, x + (int)MathRound(139 * m_DPIScale), y, x + (int)MathRound(191 * m_DPIScale), y + h, "m_BtnRRNext", "下一页")) return false;
@@ -58,12 +76,12 @@ bool CPositionSizeCalculator::CreateRRControls()
     m_BtnRRPrevious.FontSize(9);
     m_BtnRRNext.FontSize(9);
     m_LblRRPage.FontSize(9);
-    y = (int)MathRound(432 * m_DPIScale);
+    y = (int)MathRound(511 * m_DPIScale);
     if (!ButtonCreate(RRTabList, m_BtnRRSave, x, y, x + (int)MathRound(151 * m_DPIScale), y + h, "m_BtnRRSave", "保存新仓方案")) return false;
     if (!ButtonCreate(RRTabList, m_BtnRRReset, x + (int)MathRound(160 * m_DPIScale), y, right, y + h, "m_BtnRRReset", "撤销未保存修改")) return false;
     m_BtnRRSave.FontSize(9);
     m_BtnRRReset.FontSize(9);
-    y = (int)MathRound(461 * m_DPIScale);
+    y = (int)MathRound(540 * m_DPIScale);
     if (!LabelCreate(RRTabList, m_LblRRStatus, x, y, right, y + h, "m_LblRRStatus", "")) return false;
     y += (int)MathRound(21 * m_DPIScale);
     if (!LabelCreate(RRTabList, m_LblRRStatus2, x, y, right, y + h, "m_LblRRStatus2", "")) return false;
@@ -77,6 +95,11 @@ bool CPositionSizeCalculator::CreateRRControls()
 void CPositionSizeCalculator::LoadRRDraft()
 {
     m_rr_position_id = 0;
+    m_rr_has_plan = true;
+    m_rr_position_symbol = SymbolForTrading;
+    m_rr_position_magic = sets.MagicNumber;
+    m_CmbRRPosition.SelectByValue(0);
+    m_BtnRRManualClose.Disable();
     m_rr_expected_stage = 0;
     m_rr_live_stage = 0;
     m_rr_expected_checksum = 0;
@@ -104,28 +127,41 @@ void CPositionSizeCalculator::FillRRDraft(const RRPlan &plan)
 
 bool CPositionSizeCalculator::LoadRRPositionDraft(const ulong identifier)
 {
+    if (!SelectRRPanelPosition(identifier)) { SetRRStatus("持仓已关闭，请刷新列表。", true); return false; }
+    string symbol = PositionGetString(POSITION_SYMBOL);
+    long magic = PositionGetInteger(POSITION_MAGIC);
     RRState state;
     ulong ticket;
     string error;
-    if (!RRReadManagedPosition(SymbolForTrading, sets.MagicNumber, identifier, state, ticket, error))
+    bool managed = RRReadManagedPosition(symbol, magic, identifier, state, ticket, error);
+    if (!managed && m_rr_position_id == identifier && m_rr_has_plan)
     {
+        // A busy journal must not replace an already loaded plan or its draft.
         SetRRStatus(error, true);
         return false;
     }
     RRPlan plan;
-    RRStatePlan(state, plan);
+    ZeroMemory(plan);
+    if (managed) RRStatePlan(state, plan);
+    else ZeroMemory(state);
     m_rr_position_id = identifier;
+    m_rr_position_symbol = symbol;
+    m_rr_position_magic = magic;
+    m_rr_has_plan = managed;
+    m_CmbRRPosition.SelectByValue((long)identifier);
+    m_BtnRRManualClose.Enable();
     m_rr_state = state;
     m_rr_expected_checksum = RRPlanChecksum(plan);
     m_rr_expected_stage = state.stage;
     m_rr_live_stage = state.version == 2 ? state.stage : (state.stage >= 3 ? 2 : (state.stage >= 1 ? 1 : 0));
     m_rr_stale = false;
-    m_rr_readonly = (state.version != 2 || state.blocked != 0);
+    m_rr_readonly = (!managed || state.version != 2 || state.blocked != 0);
     FillRRDraft(plan);
     UpdateRRModeLabels();
     m_rr_last_refresh = 0;
     RefreshRRLiveStatus();
-    if (state.version != 2) SetRRStatus("旧版持仓仅供查看，继续按原规则管理。", true);
+    if (!managed) SetRRStatus("无可读取的 RR 方案，仅可手动按比例平仓；不会自动接管。", true);
+    else if (state.version != 2) SetRRStatus("旧版持仓仅供查看，继续按原规则管理。", true);
     else if (state.blocked != 0) SetRRStatus("此仓位的自动管理已暂停，请先核对专家日志。", true);
     else SetRRStatus("已载入该持仓方案；已触发的目标不可修改。");
     return true;
@@ -141,9 +177,9 @@ void CPositionSizeCalculator::UpdateRRModeLabels()
     }
     else
     {
-        m_LblRRMode.Text("持仓 #" + IntegerToString(m_rr_position_id) + (m_rr_readonly ? " · 只读" : ""));
-        int digits = (int)SymbolInfoInteger(SymbolForTrading, SYMBOL_DIGITS);
-        m_LblRRBEInfo.Text("入场 " + DoubleToString(m_rr_state.entry, digits) + " · 1R " + DoubleToString(m_rr_state.risk, digits));
+        m_LblRRMode.Text(m_rr_position_symbol + " · " + (m_rr_has_plan ? "持仓止盈方案" : "仅手动平仓"));
+        int digits = (int)SymbolInfoInteger(m_rr_position_symbol, SYMBOL_DIGITS);
+        m_LblRRBEInfo.Text(m_rr_has_plan ? "入场 " + DoubleToString(m_rr_state.entry, digits) + " · 1R " + DoubleToString(m_rr_state.risk, digits) : "没有冻结初始风险，不提供 R / TP 编辑。" );
         m_BtnRRSave.Text("应用到该持仓");
     }
     RefreshRRPlanSummary();
@@ -160,21 +196,9 @@ void CPositionSizeCalculator::OnClickBtnRRNewPlan()
 
 void CPositionSizeCalculator::OnClickBtnRRPosition()
 {
-    CaptureRRPage();
-    if (m_rr_dirty) { SetRRStatus("请先保存或撤销草稿，再切换持仓。", true); return; }
-    ulong next_id = RRNextManagedPosition(SymbolForTrading, sets.MagicNumber, m_rr_position_id);
-    if (next_id == 0 && m_rr_position_id != 0) next_id = RRNextManagedPosition(SymbolForTrading, sets.MagicNumber, 0);
-    if (next_id == 0)
-    {
-        SetRRStatus("当前品种没有本 EA 可读取的持仓。", true);
-        return;
-    }
-    if (next_id == m_rr_position_id)
-    {
-        SetRRStatus("当前只有这一笔持仓；撤销按钮可重新载入。");
-        return;
-    }
-    LoadRRPositionDraft(next_id);
+    m_rr_position_choices = "\n";
+    RefreshRRPositionChoices();
+    SetRRStatus("持仓列表已刷新；包含所有品种及手动持仓。");
 }
 
 void CPositionSizeCalculator::CaptureRRPage()
@@ -228,8 +252,10 @@ void CPositionSizeCalculator::RenderRRPage()
 
 void CPositionSizeCalculator::RefreshRRTargetPrices()
 {
-    int digits = (int)SymbolInfoInteger(SymbolForTrading, SYMBOL_DIGITS);
-    double tick = SymbolInfoDouble(SymbolForTrading, SYMBOL_TRADE_TICK_SIZE);
+    if (!m_rr_has_plan) { RefreshRRPlanSummary(); return; }
+    string symbol = m_rr_position_id == 0 ? SymbolForTrading : m_rr_position_symbol;
+    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+    double tick = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
     double entry = m_rr_position_id == 0 ? sets.EntryLevel : m_rr_state.entry;
     double risk = m_rr_position_id == 0 ? MathAbs(sets.EntryLevel - sets.StopLossLevel) : m_rr_state.risk;
     int direction = m_rr_position_id == 0 ? (sets.EntryLevel >= sets.StopLossLevel ? 1 : -1) : m_rr_state.direction;
@@ -262,6 +288,12 @@ void CPositionSizeCalculator::RefreshRRTargetPrices()
 
 void CPositionSizeCalculator::RefreshRRPlanSummary()
 {
+    if (!m_rr_has_plan)
+    {
+        m_LblRRInfo.Text("此持仓无可读取的 RR 止盈方案。");
+        m_LblRRInfo.Color(clrDarkSlateGray);
+        return;
+    }
     // Read the visible edits directly so a timer updates totals during typing
     // without capturing unfinished text or replacing any edit/checkbox value.
     RRPlan summary;
@@ -310,12 +342,41 @@ void CPositionSizeCalculator::RefreshRRLiveStatus()
     ulong now = GetTickCount64();
     if (m_rr_last_refresh != 0 && now - m_rr_last_refresh < 500) return;
     m_rr_last_refresh = now;
+    RefreshRRPositionChoices();
+    if (m_rr_position_id == 0 && RRPlanChecksum(RRActivePlan) != RRPlanChecksum(m_rr_loaded_plan))
+    {
+        CaptureRRPage();
+        if (!m_rr_dirty)
+        {
+            LoadRRDraft();
+            SetRRStatus("共用新仓方案已更新，已载入最新设置。");
+        }
+        else if (!m_rr_stale)
+        {
+            m_rr_stale = true;
+            RenderRRPage();
+            SetRRStatus("共用方案已更新；草稿已保留，请撤销重载后修改。", true);
+        }
+    }
     RefreshRRTargetPrices();
     if (m_rr_position_id == 0) return;
+    if (!SelectRRPanelPosition(m_rr_position_id))
+    {
+        m_BtnRRManualClose.Disable();
+        m_LblRRPositionInfo.Text("持仓已关闭；请重新选择，草稿仍保留。");
+        return;
+    }
+    m_BtnRRManualClose.Enable();
+    if (!m_rr_has_plan)
+    {
+        double remaining = PositionGetDouble(POSITION_VOLUME);
+        m_LblRRPositionInfo.Text("当前余仓 " + DoubleToString(remaining, CountDecimalPlaces(remaining)) + " 手 · 仅手动平仓");
+        return;
+    }
     RRState current;
     ulong ticket;
     string error;
-    if (!RRReadManagedPosition(SymbolForTrading, sets.MagicNumber, m_rr_position_id, current, ticket, error))
+    if (!RRReadManagedPosition(m_rr_position_symbol, m_rr_position_magic, m_rr_position_id, current, ticket, error))
     {
         // A temporary journal lock can fail the read. Preserve every draft value;
         // saving is guarded again by the engine against a closed/changed position.
@@ -334,10 +395,10 @@ void CPositionSizeCalculator::RefreshRRLiveStatus()
         SetRRStatus("仓位已触发或方案已变化；请点撤销重新载入。", true);
     }
     if (!PositionSelectByTicket(ticket)) return;
-    int digits = (int)SymbolInfoInteger(SymbolForTrading, SYMBOL_DIGITS);
+    int digits = (int)SymbolInfoInteger(m_rr_position_symbol, SYMBOL_DIGITS);
     double volume = PositionGetDouble(POSITION_VOLUME);
     double actual_tp = PositionGetDouble(POSITION_TP);
-    double tick = SymbolInfoDouble(SymbolForTrading, SYMBOL_TRADE_TICK_SIZE);
+    double tick = SymbolInfoDouble(m_rr_position_symbol, SYMBOL_TRADE_TICK_SIZE);
     string tp_status;
     if (RRStateClosesAll(current))
     {
@@ -455,19 +516,32 @@ void CPositionSizeCalculator::OnClickBtnRRReset()
 {
     if (m_rr_position_id != 0)
     {
-        ulong ticket;
-        if (!RRSelectManagedPosition(SymbolForTrading, sets.MagicNumber, m_rr_position_id, ticket))
+        if (!SelectRRPanelPosition(m_rr_position_id))
         {
             LoadRRDraft();
             SetRRStatus("持仓已关闭或不再匹配；已撤销草稿，回到新仓方案。");
         }
         else LoadRRPositionDraft(m_rr_position_id);
     }
-    else { LoadRRDraft(); SetRRStatus("已恢复已保存的新仓方案。"); }
+    else
+    {
+        string error;
+        if (!RRPlanRead(RRPlanFileName(), RRActivePlan, error)) { SetRRStatus(error, true); return; }
+        LoadRRDraft();
+        SetRRStatus("已恢复已保存的新仓方案。");
+    }
 }
 
 void CPositionSizeCalculator::OnClickBtnRRSave()
 {
+    if (m_rr_position_id == 0 && RRPlanChecksum(RRActivePlan) != RRPlanChecksum(m_rr_loaded_plan))
+    {
+        CaptureRRPage();
+        m_rr_stale = true;
+        RenderRRPage();
+        SetRRStatus("共用新仓方案已更新，请先撤销重载后修改。", true);
+        return;
+    }
     if (m_rr_readonly || m_rr_stale)
     {
         SetRRStatus(m_rr_stale ? "仓位状态已变化，请点撤销重新载入。" : "此仓位当前仅可查看。", true);
@@ -494,7 +568,7 @@ void CPositionSizeCalculator::OnClickBtnRRSave()
     string error;
     if (m_rr_position_id != 0)
     {
-        if (!RRApplyPositionPlan(SymbolForTrading, sets.MagicNumber, m_rr_position_id, draft, m_rr_expected_checksum, m_rr_expected_stage, error))
+        if (!RRApplyPositionPlan(m_rr_position_symbol, m_rr_position_magic, m_rr_position_id, draft, m_rr_expected_checksum, m_rr_expected_stage, error))
         {
             SetRRStatus(error, true);
             return;
@@ -502,7 +576,7 @@ void CPositionSizeCalculator::OnClickBtnRRSave()
         if (LoadRRPositionDraft(m_rr_position_id)) SetRRStatus(RRPlanClosesAll(draft) ? "持仓方案已保存；最终 TP 待服务器同步。" : "方案已保存；将取消全平 TP，未安排比例继续保留。");
         return;
     }
-    if (!RRPlanCanEdit(SymbolForTrading, sets.MagicNumber, error) || !RRPlanApply(draft, error))
+    if (!RRPlanCanEdit("", sets.MagicNumber, error) || !RRPlanApply(draft, error))
     {
         SetRRStatus(error, true);
         return;

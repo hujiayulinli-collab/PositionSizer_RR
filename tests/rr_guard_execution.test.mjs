@@ -123,6 +123,7 @@ const context = vm.createContext({
         return Boolean(file.rr && file.valid !== false && file.rr.identifier === id);
     },
     RRRequestComment: state => `RR${BigInt(state.identifier).toString(16).toUpperCase()}-${state.sequence}`,
+    RMGuardExitReady: () => !env.manualPending,
     RRCanTrade: () => env.canTrade,
     PositionsTotal: () => env.positions.length,
     PositionGetTicket: index => { env.selectedPosition = env.positions[index]; return env.selectedPosition?.ticket ?? 0; },
@@ -415,5 +416,13 @@ check('latched cancellation survives restart and lost reply without re-sending',
     reset({ files, orders, now: 1000 }); assert.equal(cancel(300, '').first, false); assert.equal(env.sent.length, 0);
 });
 
+check('risk cannot send while a manual close result is unresolved', () => {
+    reset(); env.manualPending = true;
+    const status = { value: '' }, first = { value: false };
+    context.RGExitPosition(env.positions[0].ticket, 'single', 321, status, first);
+    assert.equal(env.sent.length, 0);
+});
+
 process.stdout.write(`\n${passed} guard execution tests passed against actual production function bodies.\n`);
 process.stdout.write('Scope: simulated MT5 file/order/position boundaries only; no terminal journals, UI operations or real trades.\n');
+

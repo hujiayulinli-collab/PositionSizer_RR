@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.14"
-string    Version = "3.14";
+#property version   "3.141"
+string    Version = "3.14 - RR 1.01";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -25,6 +25,7 @@ string    Version = "3.14";
 #property description DESCRIPTION_LINE_4
 
 #include "Position Sizer RR.mqh"
+#include "RRPanelRecovery.mqh"
 #include "Position Sizer.mqh";
 #include "Position Sizer Trading.mqh";
 
@@ -180,7 +181,8 @@ input(name=INPUT_DESCRIPTION_ShortButtonColor) color ShortButtonColor = CONTROLS
 input(name=INPUT_DESCRIPTION_TradeButtonColor) color TradeButtonColor = CONTROLS_BUTTON_COLOR_BG; // Trade Button Color
 input(name=INPUT_DESCRIPTION_DoNotDeleteLinesLabels) bool DoNotDeleteLinesLabels = false; // Do Not Delete Lines/Labels on on deinitialization?
 
-CPositionSizeCalculator* ExtDialog;
+CPositionSizeCalculator* ExtDialog = NULL;
+bool RRPanelInitSucceeded = false;
 
 // Global variables:
 bool Dont_Move_the_Panel_to_Default_Corner_X_Y = true;
@@ -201,6 +203,11 @@ bool DetectedColorMode;
 
 int OnInit()
 {
+    RRPanelInitSucceeded = false;
+    // Validate before allocating controls: a failed init must not leave a shell.
+    if (!RRValidateInputs()) return INIT_PARAMETERS_INCORRECT;
+    SymbolForTrading = (TradeSymbol != "" ? TradeSymbol : _Symbol);
+    if (DeinitializationReason != REASON_CHARTCHANGE) RRClearOrphanPanels();
     if (AutoDetectDarkMode) DetectedColorMode = DetectDarkMode();
     else DetectedColorMode = DarkMode;
     
@@ -250,6 +257,11 @@ int OnInit()
 
     if (DeinitializationReason != REASON_CHARTCHANGE) ExtDialog = new CPositionSizeCalculator; // Create the panel only if it is not a symbol/timeframe change.
     else OldTakeProfitsNumber = sets.TakeProfitsNumber; // Will be used to resize the panel if needed when switching symbols in some modes.
+    if (CheckPointer(ExtDialog) != POINTER_DYNAMIC)
+    {
+        Print("[PS RR] 无法分配面板对象，初始化已取消。");
+        return INIT_FAILED;
+    }
 
     MathSrand(GetTickCount() + 293029); // Used by CreateInstanceId() in Dialog.mqh (standard library). Keep the second number unique across other panel indicators/EAs.
     
@@ -406,8 +418,16 @@ int OnInit()
 
     if (DeinitializationReason != REASON_CHARTCHANGE)
     {
-        if (!ExtDialog.Create(0, "Position Sizer RR (ver. " + Version + ")", 0, DefaultPanelPositionX, DefaultPanelPositionY)) return INIT_FAILED;
-        ExtDialog.Run();
+        if (!ExtDialog.Create(0, "Position Sizer RR (ver. " + Version + ")", 0, DefaultPanelPositionX, DefaultPanelPositionY))
+        {
+            PrintFormat("[PS RR] 面板创建失败，错误 %d；将清理未完成的面板。", GetLastError());
+            return INIT_FAILED;
+        }
+        if (!ExtDialog.Run())
+        {
+            PrintFormat("[PS RR] 面板事件启动失败，错误 %d；将清理面板。", GetLastError());
+            return INIT_FAILED;
+        }
 
         // No ini file - move the panel according to the inputs.
         if (!FileIsExist(ExtDialog.IniFileName() + ExtDialog.IniFileExt()))
@@ -616,8 +636,9 @@ int OnInit()
     // If symbol change with a reset was enacted.
     if (is_InitControlsValues_required) ExtDialog.InitControlsValues();
 
-    if (!RRValidateInputs()) return INIT_PARAMETERS_INCORRECT;
     ExtDialog.RefreshValues();
+    RRPanelInitSucceeded = true;
+    Print("[PS RR] RR 1.01 面板初始化完成。");
     return INIT_SUCCEEDED;
 }
 
@@ -628,6 +649,23 @@ void OnDeinit(const int reason)
     
     EventKillTimer();
 
+    if (reason == REASON_INITFAILED || !RRPanelInitSucceeded)
+    {
+        // Never save a half-built layout or overwrite valid user settings.
+        if (CheckPointer(ExtDialog) == POINTER_DYNAMIC)
+        {
+            string failed_prefix = ExtDialog.Name();
+            ExtDialog.Destroy();
+            delete ExtDialog;
+            ExtDialog = NULL;
+            RRDeletePanelObjects(ChartID(), failed_prefix);
+        }
+        RRPanelInitSucceeded = false;
+        ChartRedraw();
+        return;
+    }
+    if (CheckPointer(ExtDialog) != POINTER_DYNAMIC) return;
+
     if (reason == REASON_TEMPLATE) sets.TemplateChanged = true; // Will be used to select lines according to the DefaultLinesSelected input parameter.
 
     if ((reason == REASON_CLOSE) || (reason == REASON_REMOVE) || (reason == REASON_CHARTCLOSE) || (reason == REASON_PROGRAM))
@@ -636,7 +674,8 @@ void OnDeinit(const int reason)
         if ((reason == REASON_REMOVE) || (reason == REASON_PROGRAM))
         {
             if (SettingsFile == "") ExtDialog.DeleteSettingsFile();
-            if (!FileDelete(ExtDialog.IniFileName() + ExtDialog.IniFileExt())) Print(TRANSLATION_MESSAGE_FAILED_DELETE_INI + ": ", GetLastError());
+            string layout_file = ExtDialog.IniFileName() + ExtDialog.IniFileExt();
+            if (FileIsExist(layout_file) && !FileDelete(layout_file)) Print(TRANSLATION_MESSAGE_FAILED_DELETE_INI + ": ", GetLastError());
         }
     }
     
@@ -666,11 +705,13 @@ void OnDeinit(const int reason)
         }
         ExtDialog.Destroy();
         delete ExtDialog;
+        ExtDialog = NULL;
     }
     
     if (!DoNotDeleteLinesLabels) ObjectsDeleteAll(0, ObjectPrefix + "BE"); // Delete all BE lines and labels.
     
     ChartRedraw();
+    RRPanelInitSucceeded = false;
 }
 
 void OnTick()

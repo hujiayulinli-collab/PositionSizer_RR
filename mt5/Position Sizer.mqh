@@ -17,6 +17,7 @@ private:
 
     string           m_FileName;
     double           m_DPIScale;
+    bool             m_controls_ready; // Base Create() can call virtual layout methods before our controls exist.
     bool             NoPanelMaximization; // A crutch variable to prevent panel maximization when Maximize() is called at the indicator's initialization.
     int              ATR_handle;
     int              PanelWidth;
@@ -76,6 +77,9 @@ public:
     virtual void     CheckAndRestoreLines();
     virtual void     DummyObjectSelect(string dummy_name);
     virtual bool     IsMinimized() {return m_minimized;}
+    // Keep layout files independent of the display caption/version and unique
+    // per chart. Display captions are not safe filesystem paths.
+    virtual string   IniFileName(void) const {return "PSRR_Settings\\Panel_" + IntegerToString(ChartID());}
     virtual void     IniFileLoad() {if (FileIsExist(ExtDialog.IniFileName() + ExtDialog.IniFileExt())) CAppDialog::IniFileLoad(); InitObjects();} // Need to init objects after ini file load.
     virtual void     EmulateMinMaxClick();
     virtual void     ResetChkTPLockedOnSL();
@@ -321,12 +325,19 @@ CPositionSizeCalculator::CPositionSizeCalculator(void)
 //+-------------------+
 CPositionSizeCalculator::~CPositionSizeCalculator(void)
 {
-    delete MainTabList;
-    delete RiskTabList;
-    delete MarginTabList;
-    delete SwapsTabList;
-    delete TradingTabList;
-    delete PersistentList;
+    m_controls_ready = false;
+    if (CheckPointer(MainTabList) == POINTER_DYNAMIC) delete MainTabList;
+    if (CheckPointer(RiskTabList) == POINTER_DYNAMIC) delete RiskTabList;
+    if (CheckPointer(MarginTabList) == POINTER_DYNAMIC) delete MarginTabList;
+    if (CheckPointer(SwapsTabList) == POINTER_DYNAMIC) delete SwapsTabList;
+    if (CheckPointer(TradingTabList) == POINTER_DYNAMIC) delete TradingTabList;
+    if (CheckPointer(PersistentList) == POINTER_DYNAMIC) delete PersistentList;
+    MainTabList = NULL;
+    RiskTabList = NULL;
+    MarginTabList = NULL;
+    SwapsTabList = NULL;
+    TradingTabList = NULL;
+    PersistentList = NULL;
 }
 
 // Updates filename used for settings storage.
@@ -340,6 +351,14 @@ void CPositionSizeCalculator::UpdateFileName()
 // Initialize variables from the class constructor.
 void CPositionSizeCalculator::InitVariables()
 {
+    m_controls_ready = false;
+    NoPanelMaximization = false;
+    MainTabList = NULL;
+    RiskTabList = NULL;
+    MarginTabList = NULL;
+    SwapsTabList = NULL;
+    TradingTabList = NULL;
+    PersistentList = NULL;
     LinesSelectedStatus = 0;
     remember_left = -1;
     remember_top = -1;
@@ -477,6 +496,7 @@ bool CPositionSizeCalculator::RadioGroupCreate(CList *list, CHorizontalRadioGrou
 //+-----------------------+
 bool CPositionSizeCalculator::Create(const long chart, const string name, const int subwin, const int x1, const int y1)
 {
+    m_controls_ready = false;
     double screen_dpi = (double)TerminalInfoInteger(TERMINAL_SCREEN_DPI);
     m_DPIScale = screen_dpi / 96.0;
 
@@ -516,13 +536,18 @@ bool CPositionSizeCalculator::Create(const long chart, const string name, const 
     int y2 = y1 + (int)MathRound(570 * m_DPIScale);
 
     if (!CAppDialog::Create(chart, name, subwin, x1, y1, x2, y2))               return false;
-    if (!CreateObjects())                                                         return false;
+    if (!CreateObjects())
+    {
+        m_controls_ready = false;
+        return false;
+    }
     if (sets.TakeProfitsNumber > MaxTakeProfitsNumber) MaxTakeProfitsNumber = sets.TakeProfitsNumber;
     return true;
 }
 
 void CPositionSizeCalculator::Destroy()
 {
+    m_controls_ready = false;
     m_chart.Detach();
     // Call parent destroy.
     CDialog::Destroy();
@@ -1302,7 +1327,14 @@ bool CPositionSizeCalculator::CreateObjects()
         m_OutsideTradeButton.Hide(); // Will be unhidden after it's moved to above the Entry line.
     }
 
-    InitObjects();
+    // All tab lists and controls now exist. InitObjects() may itself cause
+    // layout callbacks, so enable those callbacks before initializing values.
+    m_controls_ready = true;
+    if (!InitObjects())
+    {
+        m_controls_ready = false;
+        return false;
+    }
 
     return true;
 }
@@ -2082,6 +2114,11 @@ bool CPositionSizeCalculator::DisplayValues()
 
 void CPositionSizeCalculator::Minimize()
 {
+    if (!m_controls_ready)
+    {
+        CAppDialog::Minimize();
+        return;
+    }
     CAppDialog::Minimize();
     sets.IsPanelMinimized = true;
     if (remember_left != -1)
@@ -2094,6 +2131,11 @@ void CPositionSizeCalculator::Minimize()
 
 void CPositionSizeCalculator::Maximize()
 {
+    if (!m_controls_ready)
+    {
+        CAppDialog::Maximize();
+        return;
+    }
     if (!NoPanelMaximization)
     {
         sets.IsPanelMinimized = false;
@@ -5960,6 +6002,7 @@ bool CPositionSizeCalculator::DeleteSettingsFile()
 
 void CPositionSizeCalculator::HideShowMaximize()
 {
+    if (!m_controls_ready) return;
     // Remember the panel's location.
     remember_left = Left();
     remember_top = Top();

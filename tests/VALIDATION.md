@@ -7,8 +7,10 @@
 | MT5 MetaEditor 5.0.0.6205 原生编译 | 0 errors / 0 warnings | 完整面板与 RR 模块，已生成 EX5；详见 compile.log |
 | RR 核心回归 | 43 项通过 | 直接抽取并执行 RRCore.mqh 实际函数体，包含 1,600 组手数属性和 72 组方向/价格步长组合 |
 | 管理器回归 | 34 项通过 | 直接执行 RRProcess、RRResolvePending、RRUpdateStops 实际函数体；MT5 接口使用受控模拟 |
+| 面板生命周期及残框回归 | 31 项通过 | 旧函数复现空指针；验证提前最大化回调、部分创建失败、失败时不保存配置、只清理 RR GUI 对象、删除失败仍能退出、稳定的布局文件名 |
 | 独立代码审查 | 完成 | 未发现已确认的 P1/P2；关注初始风险冻结、交易确认、重启幂等、加仓/反转隔离、BE重试 |
-| MT5 图表交互及模拟账户成交 | **尚未执行** | 需按 MANUAL_TESTS.md 检查对应券商、品种、账户模式 |
+| MT5 真实图表界面（RR 1.01） | **通过** | AUDUSD,H1，EA 交易权限关闭：旧残框自动清除、导航器运行实例出现、完整面板、拖动、最小化、恢复、关闭均实际验证 |
+| 模拟账户成交 | **尚未执行** | 需按 MANUAL_TESTS.md 检查对应券商、品种、账户模式；界面验证没有发送交易请求 |
 | 真实账户交易 | **未执行** | 本次仅开发、测试、编译及打包 |
 
 自动状态测试覆盖：2R 阶段触发、初始手数累计减仓、直接跳到 5R、部分成交补足、重启阶段恢复、持久化失败不发单、等待中的请求不重复发单、历史订单和当前数量双确认、按请求注释/Magic 恢复、外部加仓和反转暂停、BE 不放宽已有止损、冻结区等待，以及修改失败的 3 秒重试节流。
@@ -20,10 +22,20 @@
 项目根目录执行：
 
 ```powershell
-node --test tests/rr_core.test.mjs tests/rr_manager.test.mjs
+node --test tests/rr_core.test.mjs tests/rr_manager.test.mjs tests/rr_panel_lifecycle.test.mjs
 & ./scripts/build.ps1
 ```
 
 构建脚本在本次使用的 PowerShell 7 环境中运行，把官方标准库与项目放到工作区 `.build/MQL5` 中编译，绕开 MetaEditor 6205 在 MQL5 根以外处理图片资源时报 error 313 的问题。不会向终端数据目录写入 EA，也不会启动自动交易。其他电脑需通过 `-IncludeRoot` 和 `-Editor` 指定本机路径。旧版 Windows PowerShell 若禁止脚本执行，可直接在 MetaEditor 打开安装至 MQL5/Experts 的源码并按 F7；本次没有更改系统执行策略。
 
-包内保留源码、参数预设、编译日志和两类测试。实测成交前，请重点确认最小手数、tick size、SL/TP 最小距离、FOK/IOC 和交易返回码行为。
+包内保留源码、参数预设、编译日志和三类测试。实测成交前，请重点确认最小手数、tick size、SL/TP 最小距离、FOK/IOC 和交易返回码行为。
+
+## RR 1.01 运行时故障修复
+
+用户终端日志两次记录 `invalid pointer access in 'Position Sizer.mqh' (2525,33)`。该行调用 `RiskTabList.GetFirstNode()`。当前官方 `CAppDialog::Create()` 在返回前调用虚函数 `Maximize()`，而原面板直到基类 Create 返回后才创建标签页列表，因此新版标准库会提前访问空指针。编译与交易数学测试不能发现这一运行时生命周期缺陷。
+
+修复增加控件就绪标志：早期最大化/最小化仅调用基类，列表及控件全部建好后才启用自定义布局。输入校验移到创建面板前；Create/Run 失败会清理对象而不保存不完整配置。初始化前只按 RR 标题、官方五位数字实例前缀和 GUI 对象类型清除旧残框，不删除正常原版面板、水平线或趋势线。
+
+布局文件名改为 `PSRR_Settings/Panel_<图表ID>.dat`，不再依赖面板标题或版本文字；不存在的布局文件不会触发删除失败提示。
+
+当前三类自动回归合计 **108 项通过**。实际界面验证只操作 AUDUSD 图表；没有重启整个 MT5，没有修改另一个品种图表的 EA 或持仓。

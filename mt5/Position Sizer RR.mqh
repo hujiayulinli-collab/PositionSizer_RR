@@ -965,12 +965,16 @@ void RRManage(const string symbol, const long magic)
         ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
         string filename = RRFileName(id);
         if (!FileIsExist(filename) && RRWasExisting(id)) continue;
+        if (RGPositionExitLatched(id)) continue; // Money-stop exits own this position until fully closed.
         int handle = FileOpen(filename, FILE_READ | FILE_WRITE | FILE_BIN);
         if (handle == INVALID_HANDLE)
         {
             RRNotice("无法锁定 RR 状态文件（可能另一个图表正在处理）。本次不发单。");
             continue;
         }
+        // Recheck while holding the journal lock: another chart can latch a
+        // money stop after the first check but before this first RR file exists.
+        if (RGPositionExitLatched(id)) { FileClose(handle); continue; }
         RRState s;
         bool ready = false;
         if (FileSize(handle) == 0)

@@ -40,6 +40,7 @@ bool RRNettingSlotAvailable()
 // identifiable, which is not possible after netting an unrelated position.
 bool RRBeforeTrade()
 {
+    if (!RGCanOpen(sets.MagicNumber)) return false;
     if (!RR_Enable) return true;
     ExtDialog.RefreshValues();
     if (SymbolForTrading != _Symbol)
@@ -581,7 +582,7 @@ void Trade()
                 }
                 // Recheck after the confirmation dialog: another EA may have
                 // opened a netting position while the dialog was visible.
-                if ((!RRCanSplitVolume(sub_position_size)) || (!RRNettingSlotAvailable()))
+                if ((!RGCanOpen(sets.MagicNumber)) || (!RRCanSplitVolume(sub_position_size)) || (!RRNettingSlotAvailable()))
                 {
                     isOrderPlacementFailing = true;
                     break;
@@ -706,7 +707,7 @@ void Trade()
                     position_size = 0; // End the cycle;
                 }    
             
-                if ((!RRCanSplitVolume(sub_position_size)) || (!RRNettingSlotAvailable()))
+                if ((!RGCanOpen(sets.MagicNumber)) || (!RRCanSplitVolume(sub_position_size)) || (!RRNettingSlotAvailable()))
                 {
                     isOrderPlacementFailing = true;
                     break;
@@ -776,8 +777,11 @@ void Trade()
         
     // Capture confirmed fills immediately, including SL/TP applied after a
     // market-execution order; pending orders are captured when they fill.
-    if (AtLeastOneOrderExecuted) RRManage(SymbolForTrading, sets.MagicNumber);
-    if (!DisableTradingSounds) PlaySound((isOrderPlacementFailing) || (!AtLeastOneOrderExecuted) ? "timeout.wav" : "ok.wav");
+    if (AtLeastOneOrderExecuted && RGManage(sets.MagicNumber, true)) RRManage(SymbolForTrading, sets.MagicNumber);
+    // Successful executions sound on confirmed deal events, including SL/TP.
+    // Keep the original failure sound, and its success fallback if deal sounds are off.
+    if (!DisableTradingSounds && (isOrderPlacementFailing || !AtLeastOneOrderExecuted || !RDEnableTradeSound))
+        PlaySound((isOrderPlacementFailing) || (!AtLeastOneOrderExecuted) ? "timeout.wav" : "ok.wav");
 
     delete Trade;
 }

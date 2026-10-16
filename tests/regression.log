@@ -51,7 +51,35 @@ PASS both directions: executable final price never precedes requested R
 
 50 tests passed against D:\codex\tradingIndicators\PositionSizer_RR\mt5\RRCore.mqh
 Scope: pure calculations only; terminal execution, persistence and broker behaviour require the demo scenarios in MANUAL_TESTS.md.
-✔ tests\rr_core.test.mjs (43.7393ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_core.test.mjs (49.866ms)
+ok 1 - initialization does not scan history or replay existing deals
+ok 2 - only trade DEAL_ADD callbacks enter the queue
+ok 3 - transaction callback queues work without blocking on history or playing audio
+ok 4 - actual buy and sell fills cover manual, EA, SL, TP, partial exit, and reversal reasons
+ok 5 - history verifies type and excludes balance or credit records
+ok 6 - temporarily unavailable history stays queued until the deal can be verified
+ok 7 - duplicate local callbacks and later duplicate delivery never replay a processed deal
+ok 8 - two charts atomically deduplicate the same fill even outside the burst window
+ok 9 - interleaved chart claims have exactly one winner for a shared deal
+ok 10 - different fills in a short account burst merge and a later fill sounds again
+ok 11 - sound-window CAS contention merges simultaneous different-deal playback
+ok 12 - reload neither removes shared deduplication markers nor replays history
+ok 13 - old historical add events are not replayed after initialization
+ok 14 - account switch drops the former account queue and isolates identifiers
+ok 15 - same account identifier on a different broker server has independent deduplication
+ok 16 - unreadable history cannot starve later ready fills beyond the bounded batch
+ok 17 - disabled trade sound ignores callbacks and clears queued work without disabling risk alerts
+ok 18 - missing WAV logs an actionable error without replaying the same fill endlessly
+ok 19 - empty sound name never issues the PlaySound stop-playback sentinel
+ok 20 - global variable creation failure keeps the deal queued for a safe retry
+ok 21 - risk alert overrides a recent fill and suppresses ordinary forced-close sound for two seconds
+ok 22 - duplicate risk callbacks across charts emit one Alert and one custom alarm
+ok 23 - distinct simultaneous loss conditions are independently reported
+ok 24 - risk Alert remains available even if shared notification state is unavailable
+ok 25 - 64-bit deal identifiers remain exact in deduplication keys
+ok 26 - notification implementation has no trading or broad-history replay APIs
+RR deal alerts: 26 production-method tests passed.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_deal_alerts.test.mjs (79.4736ms)
 ok 1 - runner entry uses TP zero while keeping the last target preview intact
 ok 2 - full-exit plan continues to install its server TP
 ok 3 - RR-disabled original entry preserves the ordinary TP
@@ -63,7 +91,116 @@ ok 8 - runner confirmation explains retained share and no server full TP
 ok 9 - full-exit confirmation uses actual passed TP rather than stale preview
 ok 10 - BE-only entry has no forced server TP and clearly retains 100 percent
 10 entry TP checks passed
-✔ tests\rr_entry_tp.test.mjs (46.7706ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_entry_tp.test.mjs (50.9123ms)
+ok 1 - threshold is inclusive and zero/nonfinite limits cannot trigger
+ok 2 - server day normalization handles midnight and unavailable time
+ok 3 - today accounting includes trade profit swap commission fee and excludes cash operations
+ok 4 - standalone daily monthly and agent commissions count as trading costs
+ok 5 - separate charges interest dividends and tax all affect daily net
+ok 6 - canceled buy and sell deals do not masquerade as new trading profit or loss
+ok 7 - daily snapshot covers every symbol and magic rather than only manager trades
+ok 8 - daily net includes current floating and overnight swap but excludes yesterday realized
+ok 9 - realized profit offsets realized loss before the daily threshold check
+ok 10 - minus 2500 realized plus minus 400 floating triggers exactly a 2900 cap
+ok 11 - daily trigger cancels all-symbol all-magic pending orders before any position closes
+ok 12 - single-position own-magic limit spans symbols and leaves unrelated exposure intact
+ok 13 - single-position entire-account scope includes manual and other-magic positions
+ok 14 - both caps disabled on a fresh install neither create a daily file nor block entry
+ok 15 - single-position protection does not depend on creating an unused daily journal
+ok 16 - disabled caps still honor an existing daily lock after restart and recovered PnL
+ok 17 - existing single-exit latch continues below threshold and after the cap is disabled
+ok 18 - existing order-cancel latch continues without an active daily threshold
+ok 19 - a fresh trigger never sends cancellation or close attempts when durable save fails
+ok 20 - flush failure likewise blocks new trade execution attempts
+ok 21 - executor permission failure remains latched and resumes when execution becomes available
+ok 22 - day advance retains unfinished liquidation and clears only a fully drained old lock
+ok 23 - unfinished prior-day lock liquidates first then clears on the following manager pass
+ok 24 - same-day drained lock closes newly added exposure without issuing another breach alert
+ok 25 - fully drained prior-day lock resets before considering new day exposure
+ok 26 - daily lock blocks RGCanOpen even when RR management itself is disabled
+ok 27 - unavailable current history blocks fresh entry while an enabled daily cap is being checked
+ok 28 - persisted daily liquidation continues even while account history is temporarily unavailable
+ok 29 - snapshot cache still updates floating on each pass and refreshes history after one second
+ok 30 - server midnight invalidates yesterday history cache even inside its one-second window
+ok 31 - balance change and dirty transaction force the history cache to refresh
+ok 32 - snapshot rejects account mutation or nonfinite floating rather than publishing mixed totals
+ok 33 - corrupt day journal or future server date fails closed without sending exposure changes
+ok 34 - truncated journal record is rejected and no guard execution starts
+ok 35 - account or broker changes reset cached totals and choose a different daily record
+ok 36 - input validation rejects negative nonfinite limits and unknown position scope
+RR guard: 36 production-method tests passed.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard.test.mjs (90.0911ms)
+PASS new latch saves and alarms before preflight/send with exact hedging ticket
+PASS disabled trading still latches once and resumes after permission restores
+PASS empty key cannot adopt a fresh position
+PASS latch remains active after trigger recovers or key changes
+PASS restarted unknown result cannot resend or replay first alert
+PASS unknown result recovers from exact comment and magic then closes partial remainder
+PASS different magic cannot resolve an ambiguous request
+PASS active partially filled close blocks retries even with a smaller position
+PASS terminal fill waits for position volume reflection before another close
+PASS definite rejection retries only after throttle and advances unique sequence
+PASS unknown connection/error results retain pending rather than whitelist guesses
+PASS partial chunks respect max lot and continue only after confirmation
+PASS max-volume chunk never strands a sub-minimum remainder
+PASS sell position buys exact ticket at Ask using permitted IOC
+PASS no quote, unsupported fill, and failed preflight preserve latch without sending
+PASS preflight volume change prevents oversized netting close
+PASS preflight direction change prevents an order in the old direction
+PASS ticket change with same identifier does not mark latch complete
+PASS ticket change between outer lookup and locked handler is not completion
+PASS actual disappearance during preflight completes without affecting new identifier
+PASS settled external reversal rebinds direction before flattening
+PASS external reversal cannot bypass an unresolved emergency request
+PASS later live-position update resolves terminal close despite external addition/reversal
+PASS equal or older position timestamp cannot prove an unreflected close completed
+PASS ordinary RR busy lock delays guard send but not initial latch alarm
+PASS unconfirmed ordinary RR pending prevents concurrent emergency close
+PASS confirmed ordinary RR partial allows emergency remainder while journal stays untouched
+PASS corrupt ordinary RR journal fails closed without rewriting it
+PASS empty ordinary journal from latch recheck cannot deadlock emergency liquidation
+PASS other instance holding guard lock prevents duplicate latch and send
+PASS initial save failure cannot alarm or send and torn latch cannot restart sequence
+PASS intent save failure prevents send after successful initial latch
+PASS reply save failure leaves ambiguity blocked after restart
+PASS checksummed complete-record corruption is not accepted
+PASS journal filenames isolate account and server, not trigger labels
+PASS pending order latch precedes exact-ticket cancellation
+PASS cancel permission disabled still persists trigger and resumes with empty key
+PASS unknown cancellation never retries merely because timeout elapsed
+PASS definite cancellation rejection can retry after throttle
+PASS confirmed cancelled order completes without affecting any replacement ticket
+PASS filled instead of cancelled order is terminal and leaves its position for daily scan
+PASS missing order without history remains pending rather than guessing completion
+PASS market execution orders are never mistaken for pending entries to cancel
+PASS latched cancellation survives restart and lost reply without re-sending
+
+44 guard execution tests passed against actual production function bodies.
+Scope: simulated MT5 file/order/position boundaries only; no terminal journals, UI operations or real trades.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_execution.test.mjs (72.4655ms)
+PASS without post-lock check, first-file race reaches both emergency and ordinary execution
+PASS production rechecks after first journal lock and suppresses ordinary exit in the race
+PASS an existing emergency latch skips ordinary journal and execution entirely
+PASS an unrelated emergency latch does not suspend this fresh RR position
+PASS existing RR journal resumes normally when guard does not own the position
+PASS ordinary journal lock failure cannot reach close decisions
+PASS old positions without an RR journal remain excluded
+PASS ordinary RR retains symbol and magic isolation
+PASS actual tick handler evaluates money guard before ordinary RR
+PASS actual timer evaluates guard first and dispatches queued actual-deal sounds
+PASS daily guard block prevents ordinary RR on both tick and timer
+PASS money guard still runs with RR disabled, and blocks legacy trailing if locked
+PASS incomplete panel initialization cannot start timer or tick trading paths
+PASS actual deal transaction dirties accounting and queues notification without trading
+PASS actual OnTrade invalidates realized history cache before UI refresh
+PASS actual entry preflight checks money guard even when RR is disabled
+PASS Trade always starts with guarded entry preflight
+PASS both pending and market sends recheck daily guard after their confirmation dialog
+PASS post-entry ordinary management is conditional on a fresh guard result
+
+19 guard integration tests passed against production functions.
+Scope: in-memory scheduling and boundary simulation, plus source contracts for the full trading form. No live trading.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_integration.test.mjs (69.5596ms)
 PASS legacy scalar field order still matches the released schema
 PASS v2 retains scalar prefix and adds all 20 target slots
 PASS legacy conversion preserves every scalar and clears new target fields
@@ -99,7 +236,7 @@ PASS released v1 and full-exit v2 records retain full-exit interpretation
 
 32 journal tests passed against production save/load and conversion functions.
 Scope: binary schema and state decisions with a simulated MQL file boundary; native packing and durable storage still require terminal validation.
-✔ tests\rr_journal.test.mjs (64.7149ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_journal.test.mjs (81.7338ms)
 PASS read returns frozen plan and ticket without writes
 PASS read legacy plan as two targets without migration
 PASS read never adopts a position without journal
@@ -149,7 +286,7 @@ PASS near-100 full-exit stage still owes the final lot step and cannot be edited
 
 46 live-plan tests passed against production APIs.
 Scope: in-memory MT5 boundaries; no real positions, journal files, or trading requests.
-✔ tests\rr_live_plan.test.mjs (56.7044ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_live_plan.test.mjs (73.0785ms)
 PASS below 2R updates stops without reducing
 PASS 2R intent is saved before requesting half close
 PASS first partial fill is topped up only to the initial half
@@ -252,7 +389,7 @@ PASS previously valid near-100 v2 plan still closes the exact remainder
 
 99 manager tests passed against production RRProcess/RRProcessMulti/RRResolvePending/RRUpdateStops/RRCapture/RRPlanCanEdit.
 Scope: simulated MT5 boundaries; no real trading requests, terminal compilation or journal IO.
-✔ tests\rr_manager.test.mjs (48.7681ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manager.test.mjs (61.148ms)
 PASS old production callback reproduces invalid RiskTabList access
 PASS old early Minimize prematurely saves panel settings
 PASS constructor initialization explicitly clears lifecycle state and all lists
@@ -290,7 +427,7 @@ PASS a user price line carrying an RR-like Caption name cannot initiate cleanup
 
 34 lifecycle tests passed; the preserved pre-fix methods reproduce the reported null-list failure.
 Scope: actual MQL panel method bodies with simulated MT5 boundaries; visual terminal checks remain necessary.
-✔ tests\rr_panel_lifecycle.test.mjs (426.399ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_panel_lifecycle.test.mjs (448.0539ms)
 PASS target limit is exactly 20
 PASS single final exit is valid
 PASS legacy two-target default is valid
@@ -351,7 +488,7 @@ PASS all 1..20 equal-share target counts handle exact step quantities
 
 57 tests passed against production RRPlan.mqh functions.
 Scope: input validation and planned quantities; broker execution and binary file durability are tested separately.
-✔ tests\rr_plan.test.mjs (43.5476ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan.test.mjs (56.2985ms)
 ok 1 - saved plan loads R, percentage and BE independently
 ok 2 - unused rows are hidden and visible targets stay visible
 ok 3 - typing and BE edits remain a draft until save
@@ -395,7 +532,7 @@ ok 40 - a zero-close BE-only plan displays all original volume retained without 
 ok 41 - cross-page allocation summary includes saved draft values on other pages
 ok 42 - invalid and excessive percentages do not advertise a valid retained balance or rewrite input
 RR plan UI: 42 production-method tests passed.
-✔ tests\rr_plan_ui.test.mjs (107.1043ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan_ui.test.mjs (125.9361ms)
 ok 1 - managed target uses frozen fill rather than current calculator entry
 ok 2 - all matching managed positions have separate names
 ok 3 - triggered target stays at original level with triggered status
@@ -419,12 +556,12 @@ ok 20 - runner retains completed target marks after all targets have triggered
 ok 21 - new runner preview clearly shows retained share
 ok 22 - BE-only runner labels show no invented forced close
 22 chart annotations checks passed
-✔ tests\rr_target_lines.test.mjs (64.5616ms)
-ℹ tests 9
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_target_lines.test.mjs (77.941ms)
+ℹ tests 13
 ℹ suites 0
-ℹ pass 9
+ℹ pass 13
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 447.4282
+ℹ duration_ms 479.7607

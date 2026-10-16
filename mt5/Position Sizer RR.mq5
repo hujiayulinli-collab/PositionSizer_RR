@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.170"
-string    Version = "3.14 - RR 1.30";
+#property version   "3.180"
+string    Version = "3.14 - RR 1.40";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -25,7 +25,11 @@ string    Version = "3.14 - RR 1.30";
 #property description DESCRIPTION_LINE_4
 
 #include "RRPlan.mqh"
+bool RGPositionExitLatched(const ulong identifier);
 #include "Position Sizer RR.mqh"
+#include "RRGuardExecution.mqh"
+#include "RRDealAlerts.mqh"
+#include "RRGuard.mqh"
 #include "RRTargetLines.mqh"
 #include "RRPanelRecovery.mqh"
 #include "Position Sizer.mqh";
@@ -206,9 +210,12 @@ bool DetectedColorMode;
 int OnInit()
 {
     RRDeleteTargetLines();
+    RGDeleteStatus();
     RRPanelInitSucceeded = false;
     // Validate before allocating controls: a failed init must not leave a shell.
-    if (!RRValidateInputs()) return INIT_PARAMETERS_INCORRECT;
+    if (!RRValidateInputs() || !RGValidateInputs()) return INIT_PARAMETERS_INCORRECT;
+    RGResetContext();
+    RDInitAlerts();
     SymbolForTrading = (TradeSymbol != "" ? TradeSymbol : _Symbol);
     if (DeinitializationReason != REASON_CHARTCHANGE) RRClearOrphanPanels();
     if (AutoDetectDarkMode) DetectedColorMode = DetectDarkMode();
@@ -642,13 +649,14 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] RR 1.30 面板初始化完成。");
+    Print("[PS RR] RR 1.40 面板初始化完成。亏损保护按输入参数执行，0 金额表示关闭。");
     return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
     RRDeleteTargetLines();
+    RGDeleteStatus();
     RRShutdown();
     DeinitializationReason = reason; // Remember reason to avoid recreating the panel in the OnInit() if it is not deleted here.
     
@@ -721,11 +729,12 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-    RRManage(SymbolForTrading, sets.MagicNumber);
+    if (!RRPanelInitSucceeded) return;
+    if (RGManage(sets.MagicNumber)) RRManage(SymbolForTrading, sets.MagicNumber);
     ExtDialog.RefreshValues();
     RRRefreshViews();
 
-    if ((!RR_Enable) && (sets.TrailingStopPoints > 0)) DoTrailingStop();
+    if ((!RR_Enable) && (!RGEntryBlocked) && (sets.TrailingStopPoints > 0)) DoTrailingStop();
 }
 
 void OnChartEvent(const int id,
@@ -1125,8 +1134,16 @@ void OnChartEvent(const int id,
 //+------------------------------------------------------------------+
 void OnTrade()
 {
+    RGHistoryDirty = true;
+    if (!RRPanelInitSucceeded) return;
     ExtDialog.RefreshValues();
     ChartRedraw();
+}
+
+void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest &request, const MqlTradeResult &result)
+{
+    RGHistoryDirty = true;
+    RDOnTransaction(trans, sets.MagicNumber);
 }
 
 //+------------------------------------------------------------------+
@@ -1134,9 +1151,11 @@ void OnTrade()
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+    if (!RRPanelInitSucceeded) return;
     // RR exits also run when ticks on the chart are sparse; do not put this
     // behind the panel's refresh throttle.
-    RRManage(SymbolForTrading, sets.MagicNumber);
+    if (RGManage(sets.MagicNumber)) RRManage(SymbolForTrading, sets.MagicNumber);
+    RDFlushAlerts(sets.MagicNumber);
     RRRefreshViews();
     /**
      * Release resource 50ms to prevent freeze
@@ -1152,6 +1171,7 @@ void OnTimer()
 void RRRefreshViews(const bool force = false)
 {
     if (!RRPanelInitSucceeded || CheckPointer(ExtDialog) != POINTER_DYNAMIC) return;
+    RGRefreshStatus();
     ExtDialog.RefreshRRLiveStatus();
     RRRefreshTargetLines(SymbolForTrading, sets.MagicNumber, tEntryLevel, tStopLossLevel,
         sets.TradeDirection == Long ? 1 : -1, force);

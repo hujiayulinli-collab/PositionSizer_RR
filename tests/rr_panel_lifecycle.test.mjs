@@ -264,7 +264,7 @@ function globalFunction(source, name) {
 
 check('OnInit validates RR before allocating or creating controls', () => {
     const { body } = globalFunction(entrySource, 'OnInit');
-    const validation = body.indexOf('if (!RRValidateInputs()) return INIT_PARAMETERS_INCORRECT;');
+    const validation = body.indexOf('if (!RRValidateInputs() || !RGValidateInputs()) return INIT_PARAMETERS_INCORRECT;');
     assert.ok(validation >= 0);
     assert.ok(body.indexOf('RRPanelInitSucceeded = false;') < validation);
     assert.ok(validation < body.indexOf('new CPositionSizeCalculator'));
@@ -283,6 +283,7 @@ function deinitFixture(initialized, hasPanel, layoutExists = true) {
         RRPanelInitSucceeded: initialized, DeinitializationReason: -1, POINTER_DYNAMIC: 'dynamic', NULL: null,
         RRShutdown: () => events.push('rr-shutdown'), EventKillTimer: () => events.push('timer-stop'),
         RRDeleteTargetLines: () => events.push('clear-rr-targets'),
+        RGDeleteStatus: () => events.push('clear-guard-status'),
         CheckPointer: value => value ? 'dynamic' : 'invalid',
         __delete: () => events.push('delete-panel'),
         RRDeletePanelObjects: (_chart, prefix) => events.push(`delete-prefix:${prefix}`),
@@ -307,12 +308,12 @@ function deinitFixture(initialized, hasPanel, layoutExists = true) {
 }
 check('actual init-failed deinit destroys only partial panel and never saves settings', () => {
     const f = deinitFixture(false, true); f.context.OnDeinit('REASON_INITFAILED');
-    assert.deepEqual(f.events, ['clear-rr-targets', 'rr-shutdown', 'timer-stop', 'destroy-panel', 'delete-panel', 'delete-prefix:12345', 'redraw']);
+    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'timer-stop', 'destroy-panel', 'delete-panel', 'delete-prefix:12345', 'redraw']);
     assert.equal(f.context.ExtDialog, null); assert.equal(f.context.RRPanelInitSucceeded, false);
 });
 check('failure before allocation deinitializes without dereferencing a null panel', () => {
     const f = deinitFixture(false, false); f.context.OnDeinit('REASON_INITFAILED');
-    assert.deepEqual(f.events, ['clear-rr-targets', 'rr-shutdown', 'timer-stop', 'redraw']);
+    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'timer-stop', 'redraw']);
 });
 check('unfinished init skips saving even with a different deinit reason', () => {
     const f = deinitFixture(false, true); f.context.OnDeinit('REASON_PARAMETERS');

@@ -13,3 +13,11 @@ DefaultMagicNumber=2026092201
 DefaultDoNotApplyStopLoss=false
 DefaultDoNotApplyTakeProfit=false
 SurpassBrokerMaxPositionSize=false
+; Money limits are opt-in; set amounts in the account currency before use.
+RGPositionLossLimit=0
+RGPositionScope=0
+RGDailyLossLimit=0
+RGShowStatus=true
+RDEnableTradeSound=true
+RDTradeSound=ok.wav
+RDLossSound=alert.wav

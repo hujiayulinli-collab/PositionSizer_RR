@@ -1,19 +1,22 @@
 # 验证记录
 
-验证日期：2026-09-22。
+验证日期：2026-09-22。当前交付版本：**RR 1.20 / 文件版本 3.160**。
 
 | 检查 | 结果 | 范围 |
 |---|---|---|
 | MT5 MetaEditor 5.0.0.6205 原生编译 | 0 errors / 0 warnings | 完整面板与 RR 模块，已生成 EX5；详见 compile.log |
-| RR 核心回归 | 43 项通过 | 直接抽取并执行 RRCore.mqh 实际函数体，包含 1,600 组手数属性和 72 组方向/价格步长组合 |
-| 管理器回归 | 74 项通过 | 直接执行多目标/旧版处理、确认、保护、捕获及编辑限制；MT5 接口使用受控模拟 |
+| RR 核心回归 | 50 项通过 | 生产计算函数，含精确2R/5R价格边界、合法tick、Bid/Ask及原手数属性检查 |
+| 管理器回归 | 82 项通过 | 两版精确金价触发、新方案执行、最终TP同步及原有确认/重试/冻结逻辑；MT5接口使用受控模拟 |
 | 方案校验与手数 | 48 项通过 | 1–20目标、R排序、0%BE、比例合计、逐阶段累计取整及最小手数 |
 | 日志兼容与恢复 | 25 项通过 | 生产读写函数，v1结构保留、v2冻结方案、pending和触发状态恢复、损坏/短写拒绝；二进制边界模拟 |
-| 页面草稿 | 17 项通过 | 生产页面方法，添加删除、分页、BE、未保存隔离、保存失败、最终TP更新 |
+| 页面草稿与持仓选择 | 34 项通过 | 生产页面方法，草稿隔离、逐仓保存、循环选择、已触发行、阶段竞争、关闭后撤销及小数手数显示 |
+| 持仓编辑引擎 | 34 项通过 | 生产API，锁内版本与stage校验、已触发前缀不变、手动减仓/余量校验、到价竞争、IO失败、v1只读 |
+| 图表目标标记 | 17 项通过 | 生产显示逻辑，真实成交基准、多仓隔离、预览、已触发/待同步状态、标签避让、关闭清理及只读约束 |
 | 面板生命周期及残框回归 | 34 项通过 | 旧函数复现空指针；提前布局回调、部分创建失败、RR第六页、第七列表、BE草稿不污染布局、残框安全清理 |
 | 独立代码审查 | 完成 | 未发现已确认的 P1/P2；关注初始风险冻结、交易确认、重启幂等、加仓/反转隔离、BE重试 |
 | MT5 真实图表界面（RR 1.01） | **通过** | AUDUSD,H1，EA 交易权限关闭：旧残框自动清除、导航器运行实例出现、完整面板、拖动、最小化、恢复、关闭均实际验证 |
 | MT5 真实图表界面（RR 1.10） | **通过** | 新建独立 AUDUSD,H1 图表，EA 交易权限关闭：新标签、编辑R和百分比、任意行BE、6行翻页、删除回页、非法方案拒绝、撤销、保存及移除后重新加载恢复已验证 |
+| MT5 真实图表界面（RR 1.20） | **交由用户自行测试** | 按用户要求停止桌面操作，未安装或加载本轮升级版；前两行是旧版本的历史验证，不能替代此版本界面验收 |
 | 模拟账户成交 | **尚未执行** | 需按 MANUAL_TESTS.md 检查对应券商、品种、账户模式；界面验证没有发送交易请求 |
 | 真实账户交易 | **未执行** | 本次仅开发、测试、编译及打包 |
 
@@ -26,13 +29,13 @@
 项目根目录执行：
 
 ```powershell
-node --test tests/rr_core.test.mjs tests/rr_manager.test.mjs tests/rr_panel_lifecycle.test.mjs tests/rr_plan.test.mjs tests/rr_plan_ui.test.mjs tests/rr_journal.test.mjs
+node --test tests/rr_core.test.mjs tests/rr_manager.test.mjs tests/rr_panel_lifecycle.test.mjs tests/rr_plan.test.mjs tests/rr_plan_ui.test.mjs tests/rr_journal.test.mjs tests/rr_live_plan.test.mjs tests/rr_target_lines.test.mjs
 & ./scripts/build.ps1
 ```
 
 构建脚本在本次使用的 PowerShell 7 环境中运行，把官方标准库与项目放到工作区 `.build/MQL5` 中编译，绕开 MetaEditor 6205 在 MQL5 根以外处理图片资源时报 error 313 的问题。不会向终端数据目录写入 EA，也不会启动自动交易。其他电脑需通过 `-IncludeRoot` 和 `-Editor` 指定本机路径。旧版 Windows PowerShell 若禁止脚本执行，可直接在 MetaEditor 打开安装至 MQL5/Experts 的源码并按 F7；本次没有更改系统执行策略。
 
-包内保留源码、参数预设、编译日志、regression.log 和六类测试。实测成交前，请重点确认最小手数、tick size、SL/TP 最小距离、FOK/IOC 和交易返回码行为。
+包内保留源码、参数预设、编译日志、regression.log 和八类测试。当前合计 **324 项检查通过**。实测成交前，请重点确认最小手数、tick size、SL/TP 最小距离、FOK/IOC 和交易返回码行为。
 
 ## RR 1.01 运行时故障修复
 
@@ -42,7 +45,7 @@ node --test tests/rr_core.test.mjs tests/rr_manager.test.mjs tests/rr_panel_life
 
 布局文件名改为 `PSRR_Settings/Panel_<图表ID>.dat`，不再依赖面板标题或版本文字；不存在的布局文件不会触发删除失败提示。
 
-当前六类自动回归合计 **241 项通过**。实际界面验证只操作独立 AUDUSD 图表；没有重启整个 MT5，没有修改原有两个图表的 EA 或持仓。
+RR 1.10 交付时六类自动回归合计 **241 项通过**。当时的实际界面验证只操作独立 AUDUSD 图表；没有重启整个 MT5，没有修改原有两个图表的 EA 或持仓。
 
 ## RR 1.10 多目标页面
 

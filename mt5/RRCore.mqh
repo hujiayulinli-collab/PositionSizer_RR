@@ -17,6 +17,20 @@ double RRTargetPrice(const int direction, const double entry, const double risk,
     return NormalizeDouble(price, digits);
 }
 
+bool RRTargetReached(const int direction, const double entry, const double risk, const double multiple,
+                     const double bid, const double ask, const double tick_size, const int digits)
+{
+    if ((direction != 1 && direction != -1) || !MathIsValidNumber(entry) || entry <= 0
+        || !MathIsValidNumber(risk) || risk <= 0 || !MathIsValidNumber(multiple) || multiple <= 0
+        || !MathIsValidNumber(tick_size) || tick_size <= 0) return false;
+    double price = (direction == 1 ? bid : ask);
+    double target = RRTargetPrice(direction, entry, risk, multiple, tick_size, digits);
+    if (!MathIsValidNumber(price) || price <= 0 || !MathIsValidNumber(target) || target <= 0) return false;
+    // Compare the same legal tick price used by server TP, rather than dividing
+    // by binary floating-point risk (which could report 1.99999999999988 at 2R).
+    return (direction == 1 ? price >= target : price <= target);
+}
+
 double RRPartialLots(const double initial_volume, const double current_volume, const double percent, const double minimum, const double step)
 {
     if (step <= 0 || minimum <= 0 || percent <= 0 || percent >= 100) return 0;

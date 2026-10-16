@@ -562,9 +562,9 @@ void RRProcessMulti(const int handle, RRState &s, const ulong ticket, const stri
     }
     MqlTick tick;
     if (!SymbolInfoTick(symbol, tick) || tick.bid <= 0 || tick.ask <= 0) return;
-    double r = RRPriceR(s.direction, s.entry, s.risk, tick.bid, tick.ask);
+    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
     int previous_stage = s.stage;
-    while (s.stage < s.target_count && r >= s.target_r[s.stage])
+    while (s.stage < s.target_count && RRTargetReached(s.direction, s.entry, s.risk, s.target_r[s.stage], tick.bid, tick.ask, tick_size, digits))
     {
         if (s.target_be[s.stage] != 0) s.be_requested = 1;
         s.stage++;
@@ -630,9 +630,9 @@ void RRProcess(const int handle, RRState &s, const ulong ticket, const string sy
     volume = PositionGetDouble(POSITION_VOLUME);
     MqlTick tick;
     if (!SymbolInfoTick(symbol, tick) || tick.bid <= 0 || tick.ask <= 0) return;
-    double r = RRPriceR(s.direction, s.entry, s.risk, tick.bid, tick.ask);
+    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
     // A gap directly to the last target closes the remainder in one action.
-    if (s.stage == 3 || r >= s.final_r)
+    if (s.stage == 3 || RRTargetReached(s.direction, s.entry, s.risk, s.final_r, tick.bid, tick.ask, tick_size, digits))
     {
         if (s.stage != 3)
         {
@@ -642,7 +642,7 @@ void RRProcess(const int handle, RRState &s, const ulong ticket, const string sy
         RRClose(handle, s, ticket, symbol, volume);
         return;
     }
-    if (s.stage == 0 && r >= s.first_r)
+    if (s.stage == 0 && RRTargetReached(s.direction, s.entry, s.risk, s.first_r, tick.bid, tick.ask, tick_size, digits))
     {
         s.stage = 1;
         if (!RRSave(handle, s)) return;
@@ -669,6 +669,221 @@ void RRProcess(const int handle, RRState &s, const ulong ticket, const string sy
         }
     }
     RRUpdateStops(handle, s, ticket, symbol);
+}
+
+// Read-only position selection never captures or adopts an unmanaged position.
+bool RRSelectManagedPosition(const string symbol, const long magic, const ulong id, ulong &ticket)
+{
+    ticket = 0;
+    if (id == 0) return false;
+    for (int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        ulong candidate = PositionGetTicket(i);
+        if (candidate > 0 && PositionGetString(POSITION_SYMBOL) == symbol
+            && PositionGetInteger(POSITION_MAGIC) == magic && (ulong)PositionGetInteger(POSITION_IDENTIFIER) == id)
+        {
+            ticket = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+void RRStatePlan(const RRState &s, RRPlan &plan)
+{
+    ZeroMemory(plan);
+    if (s.version == 1)
+    {
+        // Legacy plans may be displayed, but their execution semantics cannot
+        // safely be converted to an editable v2 plan while a position is open.
+        plan.count = 2;
+        plan.targets[0].multiple = s.first_r;
+        plan.targets[0].percent = s.percent;
+        plan.targets[0].move_be = s.move_be;
+        plan.targets[1].multiple = s.final_r;
+        plan.targets[1].percent = 100.0 - s.percent;
+        return;
+    }
+    if (s.version != 2 || s.target_count < 1 || s.target_count > RR_MAX_TARGETS) return;
+    plan.count = s.target_count;
+    for (int i = 0; i < plan.count; i++)
+    {
+        plan.targets[i].multiple = s.target_r[i];
+        plan.targets[i].percent = s.target_percent[i];
+        plan.targets[i].move_be = s.target_be[i];
+    }
+}
+
+bool RRReadManagedPosition(const string symbol, const long magic, const ulong id, RRState &s, ulong &ticket, string &error)
+{
+    error = "";
+    ZeroMemory(s);
+    if (!RRSelectManagedPosition(symbol, magic, id, ticket))
+    { error = "该持仓已平仓，或不属于当前品种和 MagicNumber。"; return false; }
+    string filename = RRFileName(id);
+    if (!FileIsExist(filename))
+    { error = "该持仓没有已保存的 RR 记录，无法读取或编辑。"; return false; }
+    int handle = FileOpen(filename, FILE_READ | FILE_BIN);
+    if (handle == INVALID_HANDLE)
+    { error = "持仓记录正被使用或无法读取，请稍候重试。"; return false; }
+    bool valid = RRLoad(handle, s, id);
+    FileClose(handle);
+    if (!valid || s.magic != magic)
+    { error = "持仓记录损坏或不匹配，请检查专家日志。"; return false; }
+    if (!RRSelectManagedPosition(symbol, magic, id, ticket))
+    { error = "该持仓已发生变化，请重新选择。"; return false; }
+    return true;
+}
+
+// Ascending identifiers give the panel a stable sequence independent of MT5's
+// position-list ordering. Zero means no later readable managed position.
+ulong RRNextManagedPosition(const string symbol, const long magic, const ulong after_id)
+{
+    ulong next = 0;
+    for (int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if (ticket == 0 || PositionGetString(POSITION_SYMBOL) != symbol || PositionGetInteger(POSITION_MAGIC) != magic) continue;
+        ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
+        if (id <= after_id || (next != 0 && id >= next)) continue;
+        RRState s;
+        string error;
+        if (RRReadManagedPosition(symbol, magic, id, s, ticket, error)) next = id;
+    }
+    return next;
+}
+
+bool RRPositionPlanPricesSafe(const RRState &s, const RRPlan &plan, const string symbol, string &error)
+{
+    // Algo trading may be disabled while editing, but a disconnected terminal
+    // cannot establish that targets are still in front of an executable quote.
+    if (!TerminalInfoInteger(TERMINAL_CONNECTED))
+    { error = "终端未连接，无法核对当前报价，请联网后保存。"; return false; }
+    double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+    MqlTick tick;
+    if (!MathIsValidNumber(tick_size) || tick_size <= 0 || !SymbolInfoTick(symbol, tick)
+        || !MathIsValidNumber(tick.bid) || !MathIsValidNumber(tick.ask) || tick.bid <= 0 || tick.ask <= 0 || tick.ask < tick.bid)
+    { error = "当前报价或最小价格变动单位无效，请稍候重试。"; return false; }
+    // The old plan owns a target that has just crossed, even before RRManage
+    // has had its next tick/timer event. Editing must not erase that obligation.
+    if (s.stage < s.target_count && RRTargetReached(s.direction, s.entry, s.risk, s.target_r[s.stage], tick.bid, tick.ask, tick_size, digits))
+    { error = "原方案有目标刚刚到价，请等待该阶段处理完成后重新加载。"; return false; }
+    double price = (s.direction == 1 ? tick.bid : tick.ask);
+    for (int i = s.stage; i < plan.count; i++)
+    {
+        double target = RRTargetPrice(s.direction, s.entry, s.risk, plan.targets[i].multiple, tick_size, digits);
+        if (!MathIsValidNumber(target) || target <= 0 || s.direction * (target - price) < tick_size * (1.0 - 1e-7))
+        { error = StringFormat("第 %d 行：新目标价必须在当前可平仓报价前方至少一个最小跳动。", i + 1); return false; }
+    }
+    return true;
+}
+
+bool RRApplyPositionPlanLocked(const int handle, RRState &s, const ulong ticket, const string symbol,
+                               const RRPlan &plan, const uint expected_plan_checksum, const int expected_stage, string &error)
+{
+    if (s.version != 2)
+    { error = "旧版 RR v1 持仓仅支持查看，请按原方案完成该持仓。"; return false; }
+    if (s.blocked != 0)
+    { error = "该持仓管理已暂停，请先检查加仓、反转或成交记录。"; return false; }
+    if (s.pending != 0)
+    { error = "该持仓正在等待平仓确认，请等待确认后重新加载。"; return false; }
+    RRPlan previous;
+    RRStatePlan(s, previous);
+    if (s.stage != expected_stage || RRPlanChecksum(previous) != expected_plan_checksum)
+    { error = "持仓方案或触发阶段已变化，请重新加载后编辑。"; return false; }
+    if (!RRPlanValidate(plan, error)) return false;
+    if (plan.count <= s.stage)
+    { error = "已触发目标不能删除，且持仓必须保留尚未触发的最终目标。"; return false; }
+    for (int i = 0; i < s.stage; i++)
+        if (plan.targets[i].multiple != s.target_r[i] || plan.targets[i].percent != s.target_percent[i] || plan.targets[i].move_be != s.target_be[i])
+        { error = StringFormat("第 %d 行已触发，不能修改或删除。", i + 1); return false; }
+    double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
+    double minimum = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+    double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+    if (!MathIsValidNumber(step) || step <= 0 || !MathIsValidNumber(minimum) || minimum <= 0
+        || !MathIsValidNumber(tick_size) || tick_size <= 0)
+    { error = "券商手数或价格规则无效，请稍候重试。"; return false; }
+    ulong opening_order;
+    double in_volume;
+    bool mixed;
+    if (!RRHistory(s.identifier, opening_order, in_volume, mixed))
+    { error = "无法读取完整成交历史，请稍候重试。"; return false; }
+    if (!PositionSelectByTicket(ticket) || (ulong)PositionGetInteger(POSITION_IDENTIFIER) != s.identifier
+        || PositionGetString(POSITION_SYMBOL) != symbol || PositionGetInteger(POSITION_MAGIC) != s.magic)
+    { error = "该持仓已发生变化，请重新选择。"; return false; }
+    double volume = PositionGetDouble(POSITION_VOLUME);
+    double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+    int direction = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 1 : -1);
+    if (mixed || opening_order != s.opening_order || MathAbs(in_volume - s.initial_volume) > step * 0.1
+        || !MathIsValidNumber(volume) || volume <= 0 || volume > s.initial_volume + step * 0.1
+        || direction != s.direction || MathAbs(entry - s.entry) > tick_size * 0.1)
+    { error = "检测到加仓、反转或开仓价变化，不能编辑该持仓。"; return false; }
+    double cumulative = 0;
+    for (int i = 0; i < s.stage; i++) cumulative += s.target_percent[i];
+    double closed = MathMax(0.0, s.initial_volume - volume);
+    double reached_goal = MathFloor(s.initial_volume * cumulative / 100.0 / step + 1e-8) * step;
+    if (closed < reached_goal - step * 0.1)
+    { error = "已触发阶段的减仓尚未完成，请处理完成后重新加载。"; return false; }
+    // Simulate only future cumulative reductions from the ACTUAL remaining
+    // volume. Earlier manual reductions count toward every later target.
+    for (int i = s.stage; i < plan.count; i++)
+    {
+        cumulative += plan.targets[i].percent;
+        if (plan.targets[i].percent == 0) continue;
+        double goal = (i == plan.count - 1 ? s.initial_volume : MathFloor(s.initial_volume * cumulative / 100.0 / step + 1e-8) * step);
+        double close_volume = goal - closed;
+        if (close_volume <= step * 0.1) continue;
+        double remainder = s.initial_volume - goal;
+        if (close_volume < minimum - step * 1e-6 || (i < plan.count - 1 && remainder < minimum - step * 1e-6))
+        { error = StringFormat("第 %d 行：按当前余仓计算的减仓量或余仓小于券商最小手数，请调整比例。", i + 1); return false; }
+        closed = goal;
+    }
+    if (!RRPositionPlanPricesSafe(s, plan, symbol, error)) return false;
+    RRState updated = s;
+    updated.target_count = plan.count;
+    for (int i = 0; i < RR_MAX_TARGETS; i++)
+    {
+        updated.target_r[i] = (i < plan.count ? plan.targets[i].multiple : 0);
+        updated.target_percent[i] = (i < plan.count ? plan.targets[i].percent : 0);
+        updated.target_be[i] = (i < plan.count ? plan.targets[i].move_be : 0);
+    }
+    updated.first_r = updated.target_r[0];
+    updated.final_r = updated.target_r[updated.target_count - 1];
+    updated.percent = updated.target_percent[0];
+    updated.move_be = updated.target_be[0];
+    // All execution fields, including stage/BE/pending/sequence and the frozen
+    // entry/risk/initial volume, remain exactly as loaded under this file lock.
+    if (!RRSave(handle, updated))
+    { error = "保存失败，无法确认新方案已持久化；请检查专家日志后再操作。"; return false; }
+    s = updated;
+    PrintFormat("[PS RR] 仓位 %I64u 已保存新方案，已触发 %d/%d；最终 TP 将由管理流程同步。", s.identifier, s.stage, s.target_count);
+    error = "";
+    return true;
+}
+
+bool RRApplyPositionPlan(const string symbol, const long magic, const ulong id, const RRPlan &plan,
+                         const uint expected_plan_checksum, const int expected_stage, string &error)
+{
+    error = "";
+    ulong ticket;
+    if (!RRSelectManagedPosition(symbol, magic, id, ticket))
+    { error = "该持仓已平仓，或不属于当前品种和 MagicNumber。"; return false; }
+    string filename = RRFileName(id);
+    if (!FileIsExist(filename))
+    { error = "该持仓没有 RR 记录，不能通过编辑功能接管。"; return false; }
+    // No FILE_SHARE_* flags: hold the same exclusive lock used by RRManage
+    // throughout load, compare-and-swap validation and the durable append.
+    int handle = FileOpen(filename, FILE_READ | FILE_WRITE | FILE_BIN);
+    if (handle == INVALID_HANDLE)
+    { error = "持仓记录正被其他图表使用或无法写入，请稍候重试。"; return false; }
+    RRState s;
+    bool saved = false;
+    if (!RRLoad(handle, s, id) || s.magic != magic)
+        error = "持仓记录损坏或不匹配，不能保存。";
+    else saved = RRApplyPositionPlanLocked(handle, s, ticket, symbol, plan, expected_plan_checksum, expected_stage, error);
+    FileClose(handle);
+    return saved;
 }
 
 // The panel cannot change the plan while a same-strategy order is waiting to

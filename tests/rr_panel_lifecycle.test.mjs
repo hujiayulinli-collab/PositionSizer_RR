@@ -53,6 +53,8 @@ function fixture(source = production) {
         TERMINAL_SCREEN_DPI: 3, ACCOUNT_CURRENCY_DIGITS: 4,
         m_controls_ready: false, m_minimized: false, NoPanelMaximization: false,
         m_rr_page: 0, m_rr_count: 0, m_rr_visible: false,
+        m_rr_state: { version: 99, stage: 99 }, m_rr_loaded_plan: { count: 99 },
+        ZeroMemory: value => { for (const key of Object.keys(value)) value[key] = 0; },
         sets: { SelectedTab: 'Main', IsPanelMinimized: false, TakeProfitsNumber: 1 },
         remember_left: -1, remember_top: -1, MaxTakeProfitsNumber: 1, LinesSelectedStatus: 0,
         ChartWidth: 0, CheckboxOnFile: '', CheckboxOffFile: '', RadiogroupOnFile: '', RadiogroupOffFile: '',
@@ -158,6 +160,8 @@ check('old early Minimize prematurely saves panel settings', () => {
 check('constructor initialization explicitly clears lifecycle state and all lists', () => {
     const { context } = fixture();
     assert.equal(context.m_controls_ready, false); assert.equal(context.NoPanelMaximization, false);
+    assert.equal(context.m_rr_position_id, 0); assert.equal(context.m_rr_state.stage, 0);
+    assert.equal(context.m_rr_loaded_plan.count, 0); assert.equal(context.m_rr_stale, false);
     for (const name of listNames) assert.equal(context[name], null);
 });
 check('new base Create maximize callback cannot touch uncreated controls', () => {
@@ -278,6 +282,7 @@ function deinitFixture(initialized, hasPanel, layoutExists = true) {
         ...Object.fromEntries(constants.map(value => [value, value])),
         RRPanelInitSucceeded: initialized, DeinitializationReason: -1, POINTER_DYNAMIC: 'dynamic', NULL: null,
         RRShutdown: () => events.push('rr-shutdown'), EventKillTimer: () => events.push('timer-stop'),
+        RRDeleteTargetLines: () => events.push('clear-rr-targets'),
         CheckPointer: value => value ? 'dynamic' : 'invalid',
         __delete: () => events.push('delete-panel'),
         RRDeletePanelObjects: (_chart, prefix) => events.push(`delete-prefix:${prefix}`),
@@ -302,12 +307,12 @@ function deinitFixture(initialized, hasPanel, layoutExists = true) {
 }
 check('actual init-failed deinit destroys only partial panel and never saves settings', () => {
     const f = deinitFixture(false, true); f.context.OnDeinit('REASON_INITFAILED');
-    assert.deepEqual(f.events, ['rr-shutdown', 'timer-stop', 'destroy-panel', 'delete-panel', 'delete-prefix:12345', 'redraw']);
+    assert.deepEqual(f.events, ['clear-rr-targets', 'rr-shutdown', 'timer-stop', 'destroy-panel', 'delete-panel', 'delete-prefix:12345', 'redraw']);
     assert.equal(f.context.ExtDialog, null); assert.equal(f.context.RRPanelInitSucceeded, false);
 });
 check('failure before allocation deinitializes without dereferencing a null panel', () => {
     const f = deinitFixture(false, false); f.context.OnDeinit('REASON_INITFAILED');
-    assert.deepEqual(f.events, ['rr-shutdown', 'timer-stop', 'redraw']);
+    assert.deepEqual(f.events, ['clear-rr-targets', 'rr-shutdown', 'timer-stop', 'redraw']);
 });
 check('unfinished init skips saving even with a different deinit reason', () => {
     const f = deinitFixture(false, true); f.context.OnDeinit('REASON_PARAMETERS');

@@ -26,12 +26,16 @@ private:
     CHorizontalRadioGroup m_RgpIncludeOrders, m_RgpIncludeSymbols, m_RgpIncludeDirections, m_RgpMarginUtilizationBase;
 
     // The editor keeps its own text draft; only Save can replace RRActivePlan.
-    CButton          m_BtnTabRR, m_BtnRRAdd, m_BtnRRSave, m_BtnRRReset, m_BtnRRPrevious, m_BtnRRNext, m_BtnRRDelete[5];
+    CButton          m_BtnTabRR, m_BtnRRAdd, m_BtnRRSave, m_BtnRRReset, m_BtnRRPrevious, m_BtnRRNext, m_BtnRRNewPlan, m_BtnRRPosition, m_BtnRRDelete[5];
     CEdit            m_EdtRRMultiple[5], m_EdtRRPercent[5];
     CRRPlanCheckBox  m_ChkRRBreakEven[5];
-    CLabel           m_LblRRNumber[5], m_LblRRHeadingR, m_LblRRHeadingPercent, m_LblRRHeadingBE, m_LblRRMode, m_LblRRInfo, m_LblRRBEInfo, m_LblRRPage, m_LblRRStatus, m_LblRRStatus2;
-    int              m_rr_page, m_rr_count;
-    bool             m_rr_visible;
+    CLabel           m_LblRRNumber[5], m_LblRRPrice[5], m_LblRRHeadingR, m_LblRRHeadingPercent, m_LblRRHeadingBE, m_LblRRMode, m_LblRRInfo, m_LblRRBEInfo, m_LblRRPositionInfo, m_LblRRPage, m_LblRRStatus, m_LblRRStatus2;
+    int              m_rr_page, m_rr_count, m_rr_expected_stage, m_rr_live_stage;
+    bool             m_rr_visible, m_rr_stale, m_rr_readonly, m_rr_dirty;
+    ulong            m_rr_position_id, m_rr_last_refresh;
+    uint             m_rr_expected_checksum;
+    RRState          m_rr_state;
+    RRPlan           m_rr_loaded_plan;
     string           m_rr_multiple[RR_MAX_TARGETS], m_rr_percent[RR_MAX_TARGETS];
     bool             m_rr_be[RR_MAX_TARGETS];
 
@@ -134,6 +138,7 @@ public:
     CButton          m_OutsideTradeButton;
             void     MoveOutsideTradeButton();
             double   DPIScale() {return m_DPIScale;}
+            void     RefreshRRLiveStatus(); // Refreshes live labels without replacing the edit draft.
             // Remember the panel's location to have the same location for minimized and maximized states.
             int      remember_top, remember_left;
 private:
@@ -153,8 +158,14 @@ private:
     void             ShowRR();
     void             HideRR();
     void             LoadRRDraft();
+    bool             LoadRRPositionDraft(const ulong identifier);
+    void             FillRRDraft(const RRPlan &plan);
     void             CaptureRRPage();
     void             RenderRRPage();
+    void             RefreshRRTargetPrices();
+    void             UpdateRRModeLabels();
+    void             OnClickBtnRRNewPlan();
+    void             OnClickBtnRRPosition();
     void             SetRRStatus(const string text, const bool error = false);
     void             OnClickBtnTabRR();
     void             OnClickBtnRRAdd();
@@ -262,6 +273,8 @@ ON_EVENT(ON_CLICK, m_BtnRRSave, OnClickBtnRRSave)
 ON_EVENT(ON_CLICK, m_BtnRRReset, OnClickBtnRRReset)
 ON_EVENT(ON_CLICK, m_BtnRRPrevious, OnClickBtnRRPrevious)
 ON_EVENT(ON_CLICK, m_BtnRRNext, OnClickBtnRRNext)
+ON_EVENT(ON_CLICK, m_BtnRRNewPlan, OnClickBtnRRNewPlan)
+ON_EVENT(ON_CLICK, m_BtnRRPosition, OnClickBtnRRPosition)
 for (int rr_row = 0; rr_row < 5; rr_row++)
 {
     if ((id == ON_CLICK + CHARTEVENT_CUSTOM) && (lparam == m_BtnRRDelete[rr_row].Id()))
@@ -273,7 +286,9 @@ for (int rr_row = 0; rr_row < 5; rr_row++)
         ((id == ON_CHANGE + CHARTEVENT_CUSTOM) && (lparam == m_ChkRRBreakEven[rr_row].Id())))
     {
         CaptureRRPage();
-        SetRRStatus("有未保存的修改，点击“保存方案”生效。");
+        m_rr_dirty = true;
+        RefreshRRTargetPrices();
+        if (!m_rr_stale) SetRRStatus(m_rr_position_id == 0 ? "有未保存修改；保存后用于新仓。" : "有未保存修改；图线仍为已应用方案。");
         return true;
     }
 }
@@ -415,6 +430,16 @@ void CPositionSizeCalculator::InitVariables()
     m_rr_page = 0;
     m_rr_count = 0;
     m_rr_visible = false;
+    m_rr_position_id = 0;
+    m_rr_last_refresh = 0;
+    m_rr_expected_checksum = 0;
+    m_rr_expected_stage = 0;
+    m_rr_live_stage = 0;
+    m_rr_stale = false;
+    m_rr_readonly = false;
+    m_rr_dirty = false;
+    ZeroMemory(m_rr_state);
+    ZeroMemory(m_rr_loaded_plan);
     MainTabList = NULL;
     RiskTabList = NULL;
     MarginTabList = NULL;

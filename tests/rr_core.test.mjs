@@ -7,7 +7,7 @@ import vm from 'node:vm';
 
 const corePath = fileURLToPath(new URL('../mt5/RRCore.mqh', import.meta.url));
 const source = readFileSync(corePath, 'utf8');
-const names = ['RRPriceR', 'RRTargetPrice', 'RRPartialLots', 'RRBETarget', 'RRSLProtectsBE'];
+const names = ['RRPriceR', 'RRTargetPrice', 'RRTargetReached', 'RRPartialLots', 'RRBETarget', 'RRSLProtectsBE'];
 const bodies = names.map(name => {
     const signature = new RegExp(`(?:double|bool)\\s+${name}\\s*\\(([^)]*)\\)\\s*\\{`, 'm').exec(source);
     assert.ok(signature, `Missing MQL function ${name}`);
@@ -33,6 +33,7 @@ const context = vm.createContext({
     MathCeil: Math.ceil,
     MathFloor: Math.floor,
     MathMax: Math.max,
+    MathIsValidNumber: Number.isFinite,
     NormalizeDouble: (value, digits) => Number(value.toFixed(digits)),
 });
 vm.runInContext(bodies.join('\n'), context, { filename: corePath });
@@ -52,7 +53,30 @@ function near(actual, expected, epsilon = 1e-8) {
         `expected ${expected}, received ${actual}`);
 }
 
-const { RRPriceR, RRTargetPrice, RRPartialLots, RRBETarget, RRSLProtectsBE } = context;
+const { RRPriceR, RRTargetPrice, RRTargetReached, RRPartialLots, RRBETarget, RRSLProtectsBE } = context;
+
+check('XAU sell triggers at exact 2R tick despite frozen binary risk', () => {
+    assert.ok(RRPriceR(-1, 4341.74, 7.680000000000291, 4326.36, 4326.38) < 2);
+    assert.equal(RRTargetReached(-1, 4341.74, 7.680000000000291, 2, 4326.36, 4326.38, 0.01, 2), true);
+});
+check('XAU sell triggers at exact 5R tick despite frozen binary risk', () =>
+    assert.equal(RRTargetReached(-1, 4341.74, 7.680000000000291, 5, 4303.32, 4303.34, 0.01, 2), true));
+check('sell Bid reaching alone does not trigger', () =>
+    assert.equal(RRTargetReached(-1, 4341.74, 7.680000000000291, 2, 4326.38, 4326.39, 0.01, 2), false));
+check('buy Ask reaching alone does not trigger', () =>
+    assert.equal(RRTargetReached(1, 4341.74, 7.680000000000291, 2, 4357.09, 4357.10, 0.01, 2), false));
+check('buy exact tick triggers despite binary risk', () =>
+    assert.equal(RRTargetReached(1, 4341.74, 7.680000000000291, 2, 4357.10, 4357.11, 0.01, 2), true));
+check('nonaligned target waits for outward legal tick', () => {
+    assert.equal(RRTargetReached(1, 100, 0.03, 5, 100.15, 100.4, 0.25, 2), false);
+    assert.equal(RRTargetReached(1, 100, 0.03, 5, 100.25, 100.5, 0.25, 2), true);
+});
+check('invalid target calculation cannot trigger', () => {
+    assert.equal(RRTargetReached(0, 100, 10, 2, 120, 121, 0.01, 2), false);
+    assert.equal(RRTargetReached(1, 100, 0, 2, 120, 121, 0.01, 2), false);
+    assert.equal(RRTargetReached(1, 100, 10, 2, 120, 121, 0, 2), false);
+    assert.equal(RRTargetReached(1, 100, 10, 2, NaN, 121, 0.01, 2), false);
+});
 
 check('buy reaches 2R at executable Bid', () => near(RRPriceR(1, 100, 10, 120, 120.5), 2));
 check('buy Ask crossing alone does not reach 2R', () => assert.ok(RRPriceR(1, 100, 10, 119.5, 120) < 2));

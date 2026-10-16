@@ -1,3 +1,10 @@
+PASS XAU sell triggers at exact 2R tick despite frozen binary risk
+PASS XAU sell triggers at exact 5R tick despite frozen binary risk
+PASS sell Bid reaching alone does not trigger
+PASS buy Ask reaching alone does not trigger
+PASS buy exact tick triggers despite binary risk
+PASS nonaligned target waits for outward legal tick
+PASS invalid target calculation cannot trigger
 PASS buy reaches 2R at executable Bid
 PASS buy Ask crossing alone does not reach 2R
 PASS sell reaches 2R at executable Ask
@@ -42,9 +49,9 @@ PASS sell stop one tick short of BE is not protected
 PASS all whole-step partial sizes preserve minimum, step and idempotence
 PASS both directions: executable final price never precedes requested R
 
-43 tests passed against D:\codex\tradingIndicators\PositionSizer_RR\mt5\RRCore.mqh
+50 tests passed against D:\codex\tradingIndicators\PositionSizer_RR\mt5\RRCore.mqh
 Scope: pure calculations only; terminal execution, persistence and broker behaviour require the demo scenarios in MANUAL_TESTS.md.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_core.test.mjs (44.1893ms)
+✔ tests\rr_core.test.mjs (42.063ms)
 PASS legacy scalar field order still matches the released schema
 PASS v2 retains scalar prefix and adds all 20 target slots
 PASS legacy conversion preserves every scalar and clears new target fields
@@ -73,7 +80,45 @@ PASS seek failure does not append or claim success
 
 25 journal tests passed against production save/load and conversion functions.
 Scope: binary schema and state decisions with a simulated MQL file boundary; native packing and durable storage still require terminal validation.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_journal.test.mjs (56.3422ms)
+✔ tests\rr_journal.test.mjs (58.3066ms)
+PASS read returns frozen plan and ticket without writes
+PASS read legacy plan as two targets without migration
+PASS read never adopts a position without journal
+PASS read excludes other symbol or strategy
+PASS read rejects a locked, damaged, or mismatching journal
+PASS read rechecks position existence after loading
+PASS enumeration is stable sorted and excludes unmanaged positions
+PASS save appends new future plan and preserves all execution fields
+PASS completed triggered prefix and BE request are kept after editing future rows
+PASS future rows can be removed without retaining stale array values
+PASS v1 editing is refused and does not migrate journal
+PASS pending or blocked execution is refused
+PASS plan checksum and stage are checked under exclusive file lock
+PASS another editor saving first invalidates a stale draft
+PASS already triggered R, percentage and BE cannot change
+PASS triggered rows cannot be removed or bypassed with a final-only plan
+PASS stage with an unfinished cumulative reduction cannot be edited
+PASS fully triggered final stage is refused even after a partial final fill
+PASS external add, reversal, opening-order or opening-price changes are refused
+PASS unavailable history and a position disappearing during history lookup are refused
+PASS manual reduction counts toward later cumulative targets
+PASS current remainder is used to reject a future partial below minimum
+PASS future final target closes the exact remainder after manual reductions
+PASS zero-percent BE nodes remain editable when no reduction is needed
+PASS old target just reached prevents moving it away before manager latches it
+PASS old sell target uses executable Ask when detecting just-reached race
+PASS new target behind, at, or less than one tick ahead of price is rejected
+PASS one legal tick ahead is accepted for buy and sell
+PASS negative or overflow target price is rejected
+PASS disconnected terminal or invalid quote cannot approve target placement
+PASS all targets must total 100 and preserve ordering
+PASS exclusive lock failure does not modify any state
+PASS save failure reports failure without mutating the prior state
+PASS missing or invalid journal cannot be silently created or repaired
+
+34 live-plan tests passed against production APIs.
+Scope: in-memory MT5 boundaries; no real positions, journal files, or trading requests.
+✔ tests\rr_live_plan.test.mjs (49.9549ms)
 PASS below 2R updates stops without reducing
 PASS 2R intent is saved before requesting half close
 PASS first partial fill is topped up only to the initial half
@@ -148,10 +193,18 @@ PASS editing active plan cannot change already captured position plan
 PASS capture refuses arbitrary historical positions and incomplete opening fills
 PASS capture uses new-position initial stop only when history order has none
 PASS capture refuses positions without a protective initial stop
+PASS v1 exact XAU 2R price latches and reduces 0.16 without an extra tick
+PASS v1 XAU one tick before 2R does not reduce
+PASS v1 exact XAU 5R price closes all remaining volume
+PASS v2 exact XAU 2R price latches and reduces 0.16 without an extra tick
+PASS v2 XAU one tick before 2R does not reduce
+PASS v2 exact XAU 5R price closes all remaining volume
+PASS edited future plan executes new target and retains initial-volume basis
+PASS edited final TP synchronizes through existing stop flow and preserves SL
 
-74 manager tests passed against production RRProcess/RRProcessMulti/RRResolvePending/RRUpdateStops/RRCapture/RRPlanCanEdit.
+82 manager tests passed against production RRProcess/RRProcessMulti/RRResolvePending/RRUpdateStops/RRCapture/RRPlanCanEdit.
 Scope: simulated MT5 boundaries; no real trading requests, terminal compilation or journal IO.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manager.test.mjs (46.3819ms)
+✔ tests\rr_manager.test.mjs (46.2835ms)
 PASS old production callback reproduces invalid RiskTabList access
 PASS old early Minimize prematurely saves panel settings
 PASS constructor initialization explicitly clears lifecycle state and all lists
@@ -189,7 +242,7 @@ PASS a user price line carrying an RR-like Caption name cannot initiate cleanup
 
 34 lifecycle tests passed; the preserved pre-fix methods reproduce the reported null-list failure.
 Scope: actual MQL panel method bodies with simulated MT5 boundaries; visual terminal checks remain necessary.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_panel_lifecycle.test.mjs (366.108ms)
+✔ tests\rr_panel_lifecycle.test.mjs (383.364ms)
 PASS target limit is exactly 20
 PASS single final exit is valid
 PASS legacy two-target default is valid
@@ -241,7 +294,7 @@ PASS all 1..20 equal-share target counts handle exact step quantities
 
 48 tests passed against production RRPlan.mqh functions.
 Scope: input validation and planned quantities; broker execution and binary file durability are tested separately.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan.test.mjs (40.4951ms)
+✔ tests\rr_plan.test.mjs (40.7961ms)
 ok 1 - saved plan loads R, percentage and BE independently
 ok 2 - unused rows are hidden and visible targets stay visible
 ok 3 - typing and BE edits remain a draft until save
@@ -259,13 +312,49 @@ ok 14 - plan validation or persistence failure preserves active plan
 ok 15 - successful save captures current controls and refreshes final TP
 ok 16 - RR disabled can save plan without modifying the regular TP
 ok 17 - minimized page rendering never makes target controls visible
-RR plan UI: 17 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan_ui.test.mjs (53.8412ms)
-ℹ tests 6
+ok 18 - new-plan previews use calculator entry, while live targets use frozen actual fill
+ok 19 - draft target prices update without moving applied position targets
+ok 20 - live quote refresh preserves unfinished numeric text and BE edits
+ok 21 - stage advancing preserves draft but locks stale save until explicit reload
+ok 22 - other-chart plan change marks draft stale even when execution stage stays unchanged
+ok 23 - triggered rows cannot change or be deleted and retain full numeric precision on apply
+ok 24 - apply saves only the selected position and reports server TP awaiting synchronization
+ok 25 - race between last refresh and apply passes frozen checksum/stage for engine rejection
+ok 26 - legacy positions show actual targets but all mutations remain disabled
+ok 27 - switching modes cannot silently discard uncommitted text
+ok 28 - position cycle isolates plans and wraps without returning to new-plan mode
+ok 29 - transient state read failure preserves live draft and allows guarded retry
+ok 30 - legacy or blocked position remains read-only after reset
+ok 31 - closed position can explicitly discard its dirty draft and return to new-plan mode
+ok 32 - reset with a busy journal keeps a still-open position draft intact
+ok 33 - single-position next button wraps and reports that same position without losing selection
+ok 34 - fine volume steps remain visible in both original and remaining quantities
+RR plan UI: 34 production-method tests passed.
+✔ tests\rr_plan_ui.test.mjs (86.6761ms)
+ok 1 - managed target uses frozen fill rather than current calculator entry
+ok 2 - all matching managed positions have separate names
+ok 3 - triggered target stays at original level with triggered status
+ok 4 - pending final TP synchronization is never labeled server TP
+ok 5 - disabled manager still displays existing plans as paused
+ok 6 - no managed position shows clearly labeled preview
+ok 7 - invalid preview stop produces no invented targets
+ok 8 - unmanaged positions do not produce adoption annotations
+ok 9 - wrong symbol and magic are excluded
+ok 10 - closed position and preview swap remove only owned objects
+ok 11 - busy journal retains existing annotations and suppresses preview
+ok 12 - deleting a future target removes obsolete chart rows
+ok 13 - legacy trigger stages map correctly to both chart targets
+ok 14 - deinitialization removes only RR target annotations
+ok 15 - labels use compact percentages without trailing decimal zeros
+ok 16 - twenty close or offscreen target labels occupy separate visible rows
+ok 17 - chart module contains no trade or journal write actions
+17 chart annotations checks passed
+✔ tests\rr_target_lines.test.mjs (53.6619ms)
+ℹ tests 8
 ℹ suites 0
-ℹ pass 6
+ℹ pass 8
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 382.2324
+ℹ duration_ms 399.7067

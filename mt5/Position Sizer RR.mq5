@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.150"
-string    Version = "3.14 - RR 1.10";
+#property version   "3.160"
+string    Version = "3.14 - RR 1.20";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -26,6 +26,7 @@ string    Version = "3.14 - RR 1.10";
 
 #include "RRPlan.mqh"
 #include "Position Sizer RR.mqh"
+#include "RRTargetLines.mqh"
 #include "RRPanelRecovery.mqh"
 #include "Position Sizer.mqh";
 #include "Position Sizer Trading.mqh";
@@ -204,6 +205,7 @@ bool DetectedColorMode;
 
 int OnInit()
 {
+    RRDeleteTargetLines();
     RRPanelInitSucceeded = false;
     // Validate before allocating controls: a failed init must not leave a shell.
     if (!RRValidateInputs()) return INIT_PARAMETERS_INCORRECT;
@@ -639,12 +641,14 @@ int OnInit()
 
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
-    Print("[PS RR] RR 1.10 面板初始化完成。");
+    RRRefreshViews(true);
+    Print("[PS RR] RR 1.20 面板初始化完成。");
     return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
+    RRDeleteTargetLines();
     RRShutdown();
     DeinitializationReason = reason; // Remember reason to avoid recreating the panel in the OnInit() if it is not deleted here.
     
@@ -719,6 +723,7 @@ void OnTick()
 {
     RRManage(SymbolForTrading, sets.MagicNumber);
     ExtDialog.RefreshValues();
+    RRRefreshViews();
 
     if ((!RR_Enable) && (sets.TrailingStopPoints > 0)) DoTrailingStop();
 }
@@ -728,6 +733,7 @@ void OnChartEvent(const int id,
                   const double &dparam,
                   const string &sparam)
 {
+    if (id == CHARTEVENT_CHART_CHANGE) RRRefreshViews(true);
     if (id == CHARTEVENT_MOUSE_MOVE)
     {
         Mouse_Last_X = (int)lparam;
@@ -1131,6 +1137,7 @@ void OnTimer()
     // RR exits also run when ticks on the chart are sparse; do not put this
     // behind the panel's refresh throttle.
     RRManage(SymbolForTrading, sets.MagicNumber);
+    RRRefreshViews();
     /**
      * Release resource 50ms to prevent freeze
      * when change symbols or close Position Sizer
@@ -1140,6 +1147,14 @@ void OnTimer()
     if (GetTickCount64() - LastRecalculationTime < 1000) return; // Do not recalculate on timer if less than 1 second passed.
     ExtDialog.RefreshValues();
     ChartRedraw();
+}
+
+void RRRefreshViews(const bool force = false)
+{
+    if (!RRPanelInitSucceeded || CheckPointer(ExtDialog) != POINTER_DYNAMIC) return;
+    ExtDialog.RefreshRRLiveStatus();
+    RRRefreshTargetLines(SymbolForTrading, sets.MagicNumber, tEntryLevel, tStopLossLevel,
+        sets.TradeDirection == Long ? 1 : -1, force);
 }
 
 // true = dark mode

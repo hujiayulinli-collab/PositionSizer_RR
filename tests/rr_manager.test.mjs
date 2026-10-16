@@ -48,7 +48,7 @@ const constants = ['POSITION_VOLUME', 'POSITION_PRICE_OPEN', 'POSITION_TYPE', 'P
 let env;
 const context = vm.createContext({
     ...Object.fromEntries(constants.map(name => [name, name])),
-    MathFloor: Math.floor, MathCeil: Math.ceil, MathAbs: Math.abs, MathMax: Math.max,
+    MathFloor: Math.floor, MathCeil: Math.ceil, MathAbs: Math.abs, MathMax: Math.max, MathIsValidNumber: Number.isFinite,
     NormalizeDouble: (value, digits) => Number(value.toFixed(digits)),
     PositionSelectByTicket: () => env.exists,
     PositionGetDouble: name => ({ POSITION_VOLUME: env.volume, POSITION_PRICE_OPEN: env.entry,
@@ -134,7 +134,7 @@ const context = vm.createContext({
     },
 });
 vm.runInContext([
-    extract(core, 'RRPriceR'), extract(core, 'RRPartialLots'),
+    extract(core, 'RRPriceR'), extract(core, 'RRPartialLots'), extract(core, 'RRTargetReached'),
     extract(core, 'RRTargetPrice'), extract(core, 'RRBETarget'), extract(core, 'RRSLProtectsBE'),
     extract(manager, 'RRResolvePending'), extract(manager, 'RRProcessMulti'), extract(manager, 'RRProcess'),
     extract(manager, 'RRPlanCanEdit'), extract(manager, 'RRCapture'),
@@ -568,6 +568,36 @@ check('capture uses new-position initial stop only when history order has none',
 check('capture refuses positions without a protective initial stop', () => {
     assert.equal(capture({ orders: [{ ticket: 100, sl: 0, active: false }], sl: 0 }).ok, false);
     assert.equal(capture({ orders: [{ ticket: 100, sl: 101, active: false }] }).ok, false);
+});
+
+for (const version of [1, 2]) {
+    const exactState = () => state({ version, direction: -1, entry: 4341.74, risk: 7.680000000000291,
+        initial_volume: 0.32, target_count: 2, target_r: [2, 5], target_percent: [50, 50], target_be: [1, 0], be_requested: 0 });
+    const exactQuote = { direction: -1, entry: 4341.74, inVolume: 0.32, volume: 0.32, bid: 4326.36, ask: 4326.38 };
+    check(`v${version} exact XAU 2R price latches and reduces 0.16 without an extra tick`, () => {
+        const s = exactState(); const result = run(s, exactQuote);
+        assert.equal(s.stage, 1); assert.equal(result.closes[0].volume, 0.16);
+        if (version === 2) assert.equal(s.be_requested, 1);
+    });
+    check(`v${version} XAU one tick before 2R does not reduce`, () => {
+        const s = exactState(); const result = run(s, { ...exactQuote, bid: 4326.37, ask: 4326.39 });
+        assert.equal(s.stage, 0); assert.equal(result.closes.length, 0);
+    });
+    check(`v${version} exact XAU 5R price closes all remaining volume`, () => {
+        const s = exactState(); const result = run(s, { ...exactQuote, volume: 0.16, bid: 4303.32, ask: 4303.34 });
+        assert.equal(s.stage, version === 1 ? 3 : 2); assert.equal(result.closes[0].volume, 0.16);
+    });
+}
+
+check('edited future plan executes new target and retains initial-volume basis', () => {
+    const s = multiState({ stage: 1, initial_volume: 1, target_count: 3,
+        target_r: [2, 4, 6], target_percent: [50, 20, 30], target_be: [1, 0, 0], be_requested: 1, final_r: 6 });
+    const result = run(s, { bid: 140, ask: 140.2, volume: 0.5 });
+    assert.equal(s.stage, 2); assert.equal(result.closes[0].volume, 0.2); assert.equal(s.risk, 10);
+});
+check('edited final TP synchronizes through existing stop flow and preserves SL', () => {
+    const result = runStops(multiState({ final_r: 6, stage: 1, be_requested: 1 }), { sl: 102, tp: 150 });
+    assert.equal(result.sent[0].tp, 160); assert.equal(result.sent[0].sl, 102);
 });
 
 process.stdout.write(`\n${passed} manager tests passed against production RRProcess/RRProcessMulti/RRResolvePending/RRUpdateStops/RRCapture/RRPlanCanEdit.\n`);

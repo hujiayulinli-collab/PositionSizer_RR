@@ -51,7 +51,19 @@ PASS both directions: executable final price never precedes requested R
 
 50 tests passed against D:\codex\tradingIndicators\PositionSizer_RR\mt5\RRCore.mqh
 Scope: pure calculations only; terminal execution, persistence and broker behaviour require the demo scenarios in MANUAL_TESTS.md.
-✔ tests\rr_core.test.mjs (42.063ms)
+✔ tests\rr_core.test.mjs (43.7393ms)
+ok 1 - runner entry uses TP zero while keeping the last target preview intact
+ok 2 - full-exit plan continues to install its server TP
+ok 3 - RR-disabled original entry preserves the ordinary TP
+ok 4 - market TP preparation and deferred stop application retain runner TP zero, mode 1
+ok 5 - market TP preparation and deferred stop application retain runner TP zero, mode 2
+ok 6 - pending order preparation retains TP zero and initial SL
+ok 7 - both confirmation call sites pass the same transformed TP
+ok 8 - runner confirmation explains retained share and no server full TP
+ok 9 - full-exit confirmation uses actual passed TP rather than stale preview
+ok 10 - BE-only entry has no forced server TP and clearly retains 100 percent
+10 entry TP checks passed
+✔ tests\rr_entry_tp.test.mjs (46.7706ms)
 PASS legacy scalar field order still matches the released schema
 PASS v2 retains scalar prefix and adds all 20 target slots
 PASS legacy conversion preserves every scalar and clears new target fields
@@ -77,10 +89,17 @@ PASS v2 plan is revalidated during journal load
 PASS short write fails and its torn journal is not accepted
 PASS flush error prevents reporting a successful state save
 PASS seek failure does not append or claim success
+PASS runner journal reload retains completed stages and remaining allocation
+PASS all-zero BE-only plan survives binary save/load with no implicit full exit
+PASS runner journal may end in a zero-percent BE target
+PASS runner pending partial close and stop retry timestamps survive restart
+PASS an appended runner target is read from latest record without losing prior stage
+PASS actual plan validation rejects journal percentages exceeding 100
+PASS released v1 and full-exit v2 records retain full-exit interpretation
 
-25 journal tests passed against production save/load and conversion functions.
+32 journal tests passed against production save/load and conversion functions.
 Scope: binary schema and state decisions with a simulated MQL file boundary; native packing and durable storage still require terminal validation.
-✔ tests\rr_journal.test.mjs (58.3066ms)
+✔ tests\rr_journal.test.mjs (64.7149ms)
 PASS read returns frozen plan and ticket without writes
 PASS read legacy plan as two targets without migration
 PASS read never adopts a position without journal
@@ -111,14 +130,26 @@ PASS new target behind, at, or less than one tick ahead of price is rejected
 PASS one legal tick ahead is accepted for buy and sell
 PASS negative or overflow target price is rejected
 PASS disconnected terminal or invalid quote cannot approve target placement
-PASS all targets must total 100 and preserve ordering
+PASS targets cannot exceed 100 or violate ordering and BE rules
 PASS exclusive lock failure does not modify any state
 PASS save failure reports failure without mutating the prior state
 PASS missing or invalid journal cannot be silently created or repaired
+PASS a live full-exit plan may be edited into a runner without changing frozen state
+PASS completed runner may save exactly its triggered prefix without adding targets
+PASS completed runner can append future partial targets while retaining remainder
+PASS completed runner can append a full-exit remainder target
+PASS runner append rejects a target already passed and accepts a future target
+PASS completed runner prefix cannot change or exceed total 100 on append
+PASS future full-exit node can be removed to retain an already reduced runner
+PASS just-reached old full-exit node cannot be deleted to rescue a runner
+PASS runner last partial must satisfy current-volume minimum rather than force full close
+PASS all-zero BE-only live plan saves without scheduling any reduction
+PASS unfinished runner reduction still blocks editing when all targets triggered
+PASS near-100 full-exit stage still owes the final lot step and cannot be edited
 
-34 live-plan tests passed against production APIs.
+46 live-plan tests passed against production APIs.
 Scope: in-memory MT5 boundaries; no real positions, journal files, or trading requests.
-✔ tests\rr_live_plan.test.mjs (49.9549ms)
+✔ tests\rr_live_plan.test.mjs (56.7044ms)
 PASS below 2R updates stops without reducing
 PASS 2R intent is saved before requesting half close
 PASS first partial fill is topped up only to the initial half
@@ -201,10 +232,27 @@ PASS v2 XAU one tick before 2R does not reduce
 PASS v2 exact XAU 5R price closes all remaining volume
 PASS edited future plan executes new target and retains initial-volume basis
 PASS edited final TP synchronizes through existing stop flow and preserves SL
+PASS runner last target closes only allocated cumulative share
+PASS runner single 50 percent target does not close the entire position
+PASS completed runner remains open on repeated ticks and beyond last target
+PASS runner last target tops up only cumulative quantity after earlier and manual reductions
+PASS runner already manually reduced beyond plan never reduces again
+PASS runner fractional final percentage rounds down and leaves one lot step
+PASS all-zero BE-only runner never submits a close even after every target
+PASS runner final BE-only node keeps the earlier cumulative close goal
+PASS runner pending close confirms without turning last target into a full exit
+PASS runner removes old full-exit server TP while retaining initial SL
+PASS runner TP clearing can accompany BE without loosening an existing better SL
+PASS runner TP clearing is not blocked by target distance or opposite side math
+PASS runner no-TP state does not repeatedly write or send while BE already protected
+PASS runner clearing failure remains retryable and is throttled
+PASS runner TP clear waits for trading permission and persistent intent
+PASS legacy remains a full-exit plan regardless of absent v2 percentage arrays
+PASS previously valid near-100 v2 plan still closes the exact remainder
 
-82 manager tests passed against production RRProcess/RRProcessMulti/RRResolvePending/RRUpdateStops/RRCapture/RRPlanCanEdit.
+99 manager tests passed against production RRProcess/RRProcessMulti/RRResolvePending/RRUpdateStops/RRCapture/RRPlanCanEdit.
 Scope: simulated MT5 boundaries; no real trading requests, terminal compilation or journal IO.
-✔ tests\rr_manager.test.mjs (46.2835ms)
+✔ tests\rr_manager.test.mjs (48.7681ms)
 PASS old production callback reproduces invalid RiskTabList access
 PASS old early Minimize prematurely saves panel settings
 PASS constructor initialization explicitly clears lifecycle state and all lists
@@ -242,7 +290,7 @@ PASS a user price line carrying an RR-like Caption name cannot initiate cleanup
 
 34 lifecycle tests passed; the preserved pre-fix methods reproduce the reported null-list failure.
 Scope: actual MQL panel method bodies with simulated MT5 boundaries; visual terminal checks remain necessary.
-✔ tests\rr_panel_lifecycle.test.mjs (383.364ms)
+✔ tests\rr_panel_lifecycle.test.mjs (426.399ms)
 PASS target limit is exactly 20
 PASS single final exit is valid
 PASS legacy two-target default is valid
@@ -262,15 +310,24 @@ PASS percentages above 100 are rejected
 PASS nonfinite percentages are rejected
 PASS zero-percent row without BE is rejected
 PASS invalid BE flag is rejected
-PASS percentages below 100 are rejected
+PASS percentages below 100 retain the unallocated remainder
 PASS percentages above 100 are rejected
 PASS decimal percentages with a valid total pass
 PASS tiny total rounding error is tolerated
-PASS material total error is rejected
+PASS a material shortfall from 100 creates a runner plan
 PASS 100 percent before the final row is rejected
 PASS unreachable trailing BE-only node is rejected
+PASS all-zero BE-only plan is valid
+PASS runner plan may end with BE-only target
+PASS single partial target is valid without a final full exit
+PASS total and closes-all helpers preserve full-exit rounding tolerance
 PASS single final exit accepts the minimum lot
 PASS BE-only node does not require a partial close lot
+PASS BE-only runner accepts a minimum lot without scheduling any close
+PASS runner last target is rounded cumulatively and retains the last lot step
+PASS runner last target cannot bypass minimum close quantity
+PASS runner remainder must satisfy broker minimum even at last target
+PASS runner cumulative final allocation preserves fractional steps
 PASS two-target minimum lot split is rejected
 PASS two-target two-step volume can split
 PASS cumulative percentages distribute fractional steps
@@ -292,9 +349,9 @@ PASS invalid active target count has no final R
 PASS active-plan volume wrapper uses the same validated plan
 PASS all 1..20 equal-share target counts handle exact step quantities
 
-48 tests passed against production RRPlan.mqh functions.
+57 tests passed against production RRPlan.mqh functions.
 Scope: input validation and planned quantities; broker execution and binary file durability are tested separately.
-✔ tests\rr_plan.test.mjs (40.7961ms)
+✔ tests\rr_plan.test.mjs (43.5476ms)
 ok 1 - saved plan loads R, percentage and BE independently
 ok 2 - unused rows are hidden and visible targets stay visible
 ok 3 - typing and BE edits remain a draft until save
@@ -329,8 +386,16 @@ ok 31 - closed position can explicitly discard its dirty draft and return to new
 ok 32 - reset with a busy journal keeps a still-open position draft intact
 ok 33 - single-position next button wraps and reports that same position without losing selection
 ok 34 - fine volume steps remain visible in both original and remaining quantities
-RR plan UI: 34 production-method tests passed.
-✔ tests\rr_plan_ui.test.mjs (86.6761ms)
+ok 35 - runner percentage preview updates directly from typing and distinguishes saved allocation
+ok 36 - saved runner new-plan feedback retains unallocated volume and does not invent BE
+ok 37 - live runner reports pending cancellation until the actual server TP is exactly zero
+ok 38 - changing a full-close live plan to a runner preserves the selected BE flags
+ok 39 - all runner targets may already be triggered while adding a new future target remains available
+ok 40 - a zero-close BE-only plan displays all original volume retained without changing BE selection
+ok 41 - cross-page allocation summary includes saved draft values on other pages
+ok 42 - invalid and excessive percentages do not advertise a valid retained balance or rewrite input
+RR plan UI: 42 production-method tests passed.
+✔ tests\rr_plan_ui.test.mjs (107.1043ms)
 ok 1 - managed target uses frozen fill rather than current calculator entry
 ok 2 - all matching managed positions have separate names
 ok 3 - triggered target stays at original level with triggered status
@@ -348,13 +413,18 @@ ok 14 - deinitialization removes only RR target annotations
 ok 15 - labels use compact percentages without trailing decimal zeros
 ok 16 - twenty close or offscreen target labels occupy separate visible rows
 ok 17 - chart module contains no trade or journal write actions
-17 chart annotations checks passed
-✔ tests\rr_target_lines.test.mjs (53.6619ms)
-ℹ tests 8
+ok 18 - runner final partial target never claims a full server TP
+ok 19 - old full TP is explicitly pending cancellation on a saved runner
+ok 20 - runner retains completed target marks after all targets have triggered
+ok 21 - new runner preview clearly shows retained share
+ok 22 - BE-only runner labels show no invented forced close
+22 chart annotations checks passed
+✔ tests\rr_target_lines.test.mjs (64.5616ms)
+ℹ tests 9
 ℹ suites 0
-ℹ pass 8
+ℹ pass 9
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 399.7067
+ℹ duration_ms 447.4282

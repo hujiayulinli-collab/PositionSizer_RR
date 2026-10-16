@@ -61,7 +61,7 @@ const context = vm.createContext({
     StringFormat: (message, ...args) => `${message} ${args.join(' ')}`,
     ZeroMemory: object => Object.assign(object, emptyPlan()),
 });
-for (const name of ['RRPlanParseNumber', 'RRPlanValidate', 'RRPlanCheckVolume', 'RRPlanVolumeValid', 'RRPlanFinalR', 'RRPlanDefaults']) {
+for (const name of ['RRPlanTotalPercent', 'RRPlanClosesAll', 'RRPlanParseNumber', 'RRPlanValidate', 'RRPlanCheckVolume', 'RRPlanVolumeValid', 'RRPlanFinalR', 'RRPlanDefaults']) {
     vm.runInContext(extract(name), context, { filename: `RRPlan.mqh:${name}` });
 }
 
@@ -112,16 +112,35 @@ check('zero-percent row without BE is rejected', () => valid(plan([[1, 0], [2, 1
 check('invalid BE flag is rejected', () => {
     for (const value of [-1, 2, 0.5]) valid(plan([[1, 100, value]]), false);
 });
-check('percentages below 100 are rejected', () => valid(plan([[1, 30], [2, 60]]), false));
+check('percentages below 100 retain the unallocated remainder', () => valid(plan([[1, 30], [2, 60]])));
 check('percentages above 100 are rejected', () => valid(plan([[1, 70], [2, 40]]), false));
 check('decimal percentages with a valid total pass', () => valid(plan([[1, 33.33], [2, 33.33], [3, 33.34]])));
 check('tiny total rounding error is tolerated', () => valid(plan([[1, 30], [2, 69.99999995]])));
-check('material total error is rejected', () => valid(plan([[1, 30], [2, 69.99999]]), false));
+check('a material shortfall from 100 creates a runner plan', () => {
+    const p = plan([[1, 30], [2, 69.99999]]); valid(p);
+    assert.equal(context.RRPlanClosesAll(p), false);
+});
 check('100 percent before the final row is rejected', () => valid(plan([[1, 100], [2, 0, 1]]), false));
 check('unreachable trailing BE-only node is rejected', () => valid(plan([[1, 50], [2, 50], [3, 0, 1]]), false));
+check('all-zero BE-only plan is valid', () => valid(plan([[1, 0, 1], [2, 0, 1]])));
+check('runner plan may end with BE-only target', () => valid(plan([[1, 40], [2, 0, 1]])));
+check('single partial target is valid without a final full exit', () => valid(plan([[2, 50, 1]])));
+check('total and closes-all helpers preserve full-exit rounding tolerance', () => {
+    assert.equal(context.RRPlanTotalPercent(plan([[2, 40], [5, 30]])), 70);
+    assert.equal(context.RRPlanTotalPercent(plan([[2, 0, 1]])), 0);
+    assert.equal(context.RRPlanClosesAll(plan([[2, 40], [5, 60]])), true);
+    assert.equal(context.RRPlanClosesAll(plan([[2, 40], [5, 59.99999995]])), true);
+    assert.equal(context.RRPlanClosesAll(plan([[2, 40], [5, 59.99999]])), false);
+    assert.equal(context.RRPlanClosesAll(emptyPlan()), false);
+});
 
 check('single final exit accepts the minimum lot', () => volume(plan([[5, 100]]), 0.01, 0.01, 0.01));
 check('BE-only node does not require a partial close lot', () => volume(plan([[1, 0, 1], [5, 100]]), 0.01, 0.01, 0.01));
+check('BE-only runner accepts a minimum lot without scheduling any close', () => volume(plan([[1, 0, 1]]), 0.01, 0.01, 0.01));
+check('runner last target is rounded cumulatively and retains the last lot step', () => volume(plan([[2, 50, 1]]), 0.03, 0.01, 0.01));
+check('runner last target cannot bypass minimum close quantity', () => volume(plan([[2, 10, 1]]), 0.03, 0.01, 0.01, false));
+check('runner remainder must satisfy broker minimum even at last target', () => volume(plan([[2, 90, 1]]), 0.1, 0.05, 0.01, false));
+check('runner cumulative final allocation preserves fractional steps', () => volume(plan([[1, 34], [2, 33]]), 0.03, 0.01, 0.01));
 check('two-target minimum lot split is rejected', () => volume(plan([[2, 50], [5, 50]]), 0.01, 0.01, 0.01, false));
 check('two-target two-step volume can split', () => volume(plan([[2, 50], [5, 50]]), 0.02, 0.01, 0.01));
 check('cumulative percentages distribute fractional steps', () => volume(plan([[1, 34], [2, 33], [3, 33]]), 0.03, 0.01, 0.01));

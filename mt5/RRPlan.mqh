@@ -22,6 +22,20 @@ struct RRPlanRecord
 };
 RRPlan RRActivePlan;
 
+double RRPlanTotalPercent(const RRPlan &plan)
+{
+    if (plan.count < 1 || plan.count > RR_MAX_TARGETS) return 0;
+    double total = 0;
+    for (int i = 0; i < plan.count; i++) total += plan.targets[i].percent;
+    return total;
+}
+
+bool RRPlanClosesAll(const RRPlan &plan)
+{
+    // Preserve the percentage tolerance used by already-saved full-exit plans.
+    return RRPlanTotalPercent(plan) >= 100.0 - 1e-7;
+}
+
 bool RRPlanParseNumber(string text, double &value)
 {
     StringTrimLeft(text);
@@ -65,10 +79,8 @@ bool RRPlanValidate(const RRPlan &plan, string &error)
         { error = "100% 必须在最后一个目标才达到。"; return false; }
         previous = r;
     }
-    if (MathAbs(total - 100.0) > 1e-7)
-    { error = StringFormat("平仓比例合计 %.4f%%，请调整为 100%%。", total); return false; }
-    if (plan.targets[plan.count - 1].percent <= 0)
-    { error = "最后一个目标必须平掉剩余仓位。"; return false; }
+    if (total > 100.0 + 1e-7)
+    { error = StringFormat("平仓比例合计 %.4f%%，不能超过 100%%；不足 100%% 时保留余仓。", total); return false; }
     return true;
 }
 
@@ -80,14 +92,16 @@ bool RRPlanCheckVolume(const RRPlan &plan, const double volume, const double min
     { error = "手数或券商最小手数无效。"; return false; }
     double cumulative = 0;
     double closed = 0;
+    bool closes_all = RRPlanClosesAll(plan);
     for (int i = 0; i < plan.count; i++)
     {
         cumulative += plan.targets[i].percent;
         if (plan.targets[i].percent == 0) continue;
-        double goal = (i == plan.count - 1 ? volume : MathFloor(volume * cumulative / 100.0 / step + 1e-8) * step);
+        bool final_exit = closes_all && i == plan.count - 1;
+        double goal = (final_exit ? volume : MathFloor(volume * cumulative / 100.0 / step + 1e-8) * step);
         double close_volume = goal - closed;
         double remainder = volume - goal;
-        if (close_volume < minimum - step * 1e-6 || (i < plan.count - 1 && remainder < minimum - step * 1e-6))
+        if (close_volume < minimum - step * 1e-6 || (!final_exit && remainder < minimum - step * 1e-6))
         { error = StringFormat("第 %d 个目标的平仓量或余仓小于最小手数，请调整比例或手数。", i + 1); return false; }
         closed = goal;
     }

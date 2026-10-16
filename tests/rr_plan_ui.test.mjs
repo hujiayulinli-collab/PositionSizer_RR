@@ -23,6 +23,7 @@ function extract(name) {
         .replace(/\(int\)/g, '')
         .replace(/RRReadManagedPosition\(([^;\n]+), (state|current), ticket, error\)/g, 'RRReadManagedPosition($1, $2)')
         .replace('RRPlanParseNumber(m_EdtRRMultiple[row].Text(), multiple)', '((multiple = parseNumber(m_EdtRRMultiple[row].Text())) !== null)')
+        .replace('RRPlanParseNumber(percentage, summary.targets[index].percent)', 'parseInto(percentage, summary.targets[index], "percent")')
         .replace(/m_rr_state = state;/g, 'm_rr_state = structuredClone(state);')
         .replace(/m_rr_loaded_plan = plan;/g, 'm_rr_loaded_plan = structuredClone(plan);')
         .replace('(m_rr_count + 4) / 5', 'Math.floor((m_rr_count + 4) / 5)')
@@ -69,9 +70,9 @@ function fixture(count = 2) {
         canEdit: true, applyAllowed: true, canEditCalls: 0, applyCalls: 0, updates: [],
         SymbolForTrading: 'AUDUSD', sets: { MagicNumber: 123, TPMultiplier: 2, EntryLevel: 100, StopLossLevel: 90 },
         SYMBOL_DIGITS: 'digits', SYMBOL_TRADE_TICK_SIZE: 'tick', POSITION_VOLUME: 'volume', POSITION_TP: 'tp',
-        SymbolInfoInteger: () => 2, SymbolInfoDouble: () => 0.01, MathAbs: Math.abs,
+        SymbolInfoInteger: () => 2, SymbolInfoDouble: () => 0.01, MathAbs: Math.abs, MathMax: Math.max,
         RRTargetPrice: (direction, entry, risk, multiple) => Math.round((entry + direction * risk * multiple) * 100) / 100,
-        clrDimGray: 'grey', clrDarkSlateGray: 'normal', tick: 1000, GetTickCount64: () => s.tick,
+        clrDimGray: 'grey', clrDarkSlateGray: 'normal', clrFireBrick: 'error', tick: 1000, GetTickCount64: () => s.tick,
         positions: new Map(), readable: true, positionApplyCalls: [], positionApplyAllowed: true,
     };
     for (const name of ['m_LblRRNumber', 'm_LblRRPrice', 'm_EdtRRMultiple', 'm_EdtRRPercent', 'm_ChkRRBreakEven', 'm_BtnRRDelete'])
@@ -83,6 +84,9 @@ function fixture(count = 2) {
     };
     s.RRStatePlan = (state, plan) => Object.assign(plan, structuredClone(state.plan));
     s.RRPlanChecksum = plan => JSON.stringify(plan);
+    s.RRPlanTotalPercent = plan => plan.targets.slice(0, plan.count).reduce((sum, target) => sum + target.percent, 0);
+    s.RRPlanClosesAll = plan => s.RRPlanTotalPercent(plan) >= 100 - 1e-7;
+    s.RRStateClosesAll = state => state.version === 1 || s.RRPlanClosesAll(state.plan);
     s.RRNextManagedPosition = (symbol, magic, id) => {
         const ids = [...s.positions.keys()].sort((a, b) => a - b); return ids.find(i => i > id) || 0;
     };
@@ -104,7 +108,7 @@ function fixture(count = 2) {
     s.SaveSettingsOnDisk = symbol => s.updates.push(['settings', symbol]);
     const context = vm.createContext(s);
     for (const name of ['LoadRRDraft', 'FillRRDraft', 'LoadRRPositionDraft', 'UpdateRRModeLabels', 'CaptureRRPage', 'RenderRRPage', 'OnClickBtnRRAdd', 'OnClickBtnRRDelete',
-                         'RefreshRRTargetPrices', 'RefreshRRLiveStatus', 'OnClickBtnRRNewPlan', 'OnClickBtnRRPosition',
+                         'RefreshRRTargetPrices', 'RefreshRRPlanSummary', 'RefreshRRLiveStatus', 'OnClickBtnRRNewPlan', 'OnClickBtnRRPosition',
                          'OnClickBtnRRPrevious', 'OnClickBtnRRNext', 'OnClickBtnRRReset', 'OnClickBtnRRSave'])
         vm.runInContext(extract(name), context);
     s.LoadRRDraft();
@@ -324,5 +328,57 @@ check('single-position next button wraps and reports that same position without 
 check('fine volume steps remain visible in both original and remaining quantities', () => {
     const s = fixture(); addPosition(s, 42, { initial_volume: 0.003, volume: 0.001 }); s.OnClickBtnRRPosition();
     assert.match(s.m_LblRRInfo.Text(), /初始 0.003 手/); assert.match(s.m_LblRRPositionInfo.Text(), /余仓 0.001 手/);
+});
+check('runner percentage preview updates directly from typing and distinguishes saved allocation', () => {
+    const s = fixture(); s.m_EdtRRPercent[1].Text('25'); s.RefreshRRTargetPrices();
+    assert.match(s.m_LblRRInfo.Text(), /草稿 75% \/ 保留 25%.*已用 100%/);
+    assert.match(s.m_LblRRPositionInfo.Text(), /保留部分不设全平 TP/);
+    assert.equal(s.m_rr_percent[1], '50'); assert.equal(s.RRActivePlan.targets[1].percent, 50);
+});
+check('saved runner new-plan feedback retains unallocated volume and does not invent BE', () => {
+    const s = fixture(); s.m_ChkRRBreakEven[0].Checked(false); s.m_EdtRRPercent[1].Text('25'); s.OnClickBtnRRSave();
+    assert.equal(s.RRActivePlan.targets[0].move_be, 0); assert.equal(s.RRActivePlan.targets[1].move_be, 0);
+    assert.match(s.m_LblRRInfo.Text(), /已安排 75% \/ 保留 25%/); assert.doesNotMatch(s.m_LblRRInfo.Text(), /草稿|已用/);
+    assert.match(s.status.text, /保留余仓，不设置全平 TP/); assert.match(s.m_LblRRBEInfo.Text(), /仅勾 BE/);
+});
+check('live runner reports pending cancellation until the actual server TP is exactly zero', () => {
+    const s = fixture(); const p = addPosition(s); p.plan.targets[1].percent = 25; s.OnClickBtnRRPosition();
+    assert.match(s.m_LblRRInfo.Text(), /已安排 75% \/ 保留 25%/);
+    assert.match(s.m_LblRRPositionInfo.Text(), /旧TP待取消 4303.34/);
+    p.tp = 0.00001; s.tick += 600; s.RefreshRRLiveStatus(); assert.match(s.m_LblRRPositionInfo.Text(), /旧TP待取消/);
+    p.tp = 0; s.tick += 600; s.RefreshRRLiveStatus(); assert.match(s.m_LblRRPositionInfo.Text(), /全平TP已取消/);
+});
+check('changing a full-close live plan to a runner preserves the selected BE flags', () => {
+    const s = fixture(); const p = addPosition(s); s.OnClickBtnRRPosition();
+    s.m_EdtRRPercent[1].Text('25'); s.m_ChkRRBreakEven[1].Checked(true); s.OnClickBtnRRSave();
+    assert.equal(p.plan.targets[0].percent, 50); assert.equal(p.plan.targets[1].percent, 25);
+    assert.equal(p.plan.targets[0].move_be, 1); assert.equal(p.plan.targets[1].move_be, 1);
+    assert.match(s.status.text, /将取消全平 TP/); assert.match(s.m_LblRRPositionInfo.Text(), /旧TP待取消/);
+});
+check('all runner targets may already be triggered while adding a new future target remains available', () => {
+    const s = fixture(); const p = addPosition(s, 42, { stage: 2, volume: 0.08, tp: 0 }); p.plan.targets[1].percent = 25;
+    s.OnClickBtnRRPosition(); assert.equal(s.m_BtnRRAdd.enabled, true);
+    assert.equal(s.m_EdtRRMultiple[0].readonly, true); assert.equal(s.m_EdtRRMultiple[1].readonly, true);
+    s.OnClickBtnRRAdd(); assert.equal(s.m_EdtRRMultiple[2].readonly, false); s.m_EdtRRPercent[2].Text('25');
+    s.OnClickBtnRRSave(); assert.equal(p.plan.count, 3); assert.equal(p.plan.targets[2].multiple, 6);
+    assert.equal(p.plan.targets[2].percent, 25); assert.equal(p.plan.targets[0].percent, 50); assert.equal(p.plan.targets[1].percent, 25);
+    assert.match(s.status.text, /最终 TP 待服务器同步/);
+});
+check('a zero-close BE-only plan displays all original volume retained without changing BE selection', () => {
+    const s = fixture(1); s.m_EdtRRPercent[0].Text('0'); s.m_ChkRRBreakEven[0].Checked(true); s.OnClickBtnRRSave();
+    assert.match(s.m_LblRRInfo.Text(), /已安排 0% \/ 保留 100%/);
+    assert.equal(s.RRActivePlan.targets[0].move_be, 1); assert.equal(s.RRActivePlan.targets[0].percent, 0);
+});
+check('cross-page allocation summary includes saved draft values on other pages', () => {
+    const s = fixture(6); s.m_EdtRRPercent[0].Text('10'); s.OnClickBtnRRNext(); s.m_EdtRRPercent[0].Text('15');
+    s.RefreshRRTargetPrices();
+    assert.match(s.m_LblRRInfo.Text(), /草稿 91.666/); assert.match(s.m_LblRRInfo.Text(), /保留 8.333/);
+    assert.equal(s.m_EdtRRPercent[0].Text(), '15');
+});
+check('invalid and excessive percentages do not advertise a valid retained balance or rewrite input', () => {
+    const s = fixture(); s.m_EdtRRPercent[0].Text('1..'); s.RefreshRRTargetPrices();
+    assert.match(s.m_LblRRInfo.Text(), /未填完整/); assert.equal(s.m_EdtRRPercent[0].Text(), '1..');
+    s.m_EdtRRPercent[0].Text('75'); s.RefreshRRTargetPrices(); assert.match(s.m_LblRRInfo.Text(), /125%.*超出 100%/);
+    assert.equal(s.m_LblRRInfo.color, 'error'); assert.equal(s.RRActivePlan.targets[0].percent, 50);
 });
 console.log(`RR plan UI: ${count} production-method tests passed.`);

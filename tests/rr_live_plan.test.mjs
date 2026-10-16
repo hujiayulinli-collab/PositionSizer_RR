@@ -140,8 +140,8 @@ const context = vm.createContext({
     OrderSend: () => { throw new Error('Editing must never send a trade request'); },
 });
 for (const name of ['RRTargetPrice', 'RRTargetReached']) vm.runInContext(extract(core, name), context);
-for (const name of ['RRPlanValidate', 'RRPlanChecksum']) vm.runInContext(extract(plans, name), context);
-for (const name of ['RRSelectManagedPosition', 'RRStatePlan', 'RRReadManagedPosition', 'RRNextManagedPosition',
+for (const name of ['RRPlanTotalPercent', 'RRPlanClosesAll', 'RRPlanValidate', 'RRPlanChecksum']) vm.runInContext(extract(plans, name), context);
+for (const name of ['RRStateClosesAll', 'RRSelectManagedPosition', 'RRStatePlan', 'RRReadManagedPosition', 'RRNextManagedPosition',
     'RRPositionPlanPricesSafe', 'RRApplyPositionPlanLocked', 'RRApplyPositionPlan'])
     vm.runInContext(extract(manager, name), context, { filename: `production:${name}` });
 
@@ -323,8 +323,8 @@ check('disconnected terminal or invalid quote cannot approve target placement', 
         reset(state(), overrides); assert.equal(apply().ok, false);
     }
 });
-check('all targets must total 100 and preserve ordering', () => {
-    for (const rows of [[[2.5, 40], [6, 50]], [[6, 50], [2.5, 50]], [[2.5, 0], [6, 100]]]) {
+check('targets cannot exceed 100 or violate ordering and BE rules', () => {
+    for (const rows of [[[2.5, 60], [6, 50]], [[6, 50], [2.5, 50]], [[2.5, 0], [6, 100]]]) {
         reset(); assert.equal(apply(plan(rows)).ok, false);
     }
 });
@@ -338,6 +338,70 @@ check('save failure reports failure without mutating the prior state', () => {
 check('missing or invalid journal cannot be silently created or repaired', () => {
     reset(state(), { files: {} }); assert.equal(apply().ok, false); assert.equal(env.opens.length, 0);
     reset(); env.files['journal:42'].valid = false; assert.equal(apply().ok, false);
+});
+
+function completedRunner(overrides = {}) {
+    return state({ target_count: 1, target_r: [2, ...Array(19).fill(0)], target_percent: [50, ...Array(19).fill(0)],
+        target_be: [1, ...Array(19).fill(0)], first_r: 2, final_r: 2, percent: 50, stage: 1, be_requested: 1, ...overrides });
+}
+check('a live full-exit plan may be edited into a runner without changing frozen state', () => {
+    reset(); assert.equal(apply(plan([[2.5, 50, 1]])).ok, true);
+    assert.equal(context.RRStateClosesAll(env.saved[0]), false); assert.equal(env.saved[0].initial_volume, 1);
+});
+check('completed runner may save exactly its triggered prefix without adding targets', () => {
+    reset(completedRunner(), { positions: [position({ volume: 0.5 })], bid: 130, ask: 130.2 });
+    assert.equal(apply(plan([[2, 50, 1]])).ok, true);
+    assert.equal(env.saved[0].stage, 1); assert.equal(env.saved[0].target_count, 1);
+    assert.equal(env.saved[0].be_requested, 1); assert.equal(env.saved[0].sequence, 7);
+});
+check('completed runner can append future partial targets while retaining remainder', () => {
+    reset(completedRunner(), { positions: [position({ volume: 0.5 })], bid: 130, ask: 130.2 });
+    assert.equal(apply(plan([[2, 50, 1], [4, 25]])).ok, true);
+    assert.equal(context.RRStateClosesAll(env.saved[0]), false); assert.equal(env.saved[0].stage, 1);
+});
+check('completed runner can append a full-exit remainder target', () => {
+    reset(completedRunner(), { positions: [position({ volume: 0.5 })], bid: 130, ask: 130.2 });
+    assert.equal(apply(plan([[2, 50, 1], [4, 20], [6, 30]])).ok, true);
+    assert.equal(context.RRStateClosesAll(env.saved[0]), true); assert.equal(env.saved[0].final_r, 6);
+});
+check('runner append rejects a target already passed and accepts a future target', () => {
+    reset(completedRunner(), { positions: [position({ volume: 0.5 })], bid: 145, ask: 145.2 });
+    assert.equal(apply(plan([[2, 50, 1], [4, 25]])).ok, false);
+    reset(completedRunner(), { positions: [position({ volume: 0.5 })], bid: 145, ask: 145.2 });
+    assert.equal(apply(plan([[2, 50, 1], [5, 25]])).ok, true);
+});
+check('completed runner prefix cannot change or exceed total 100 on append', () => {
+    for (const rows of [[[2, 40, 1], [4, 25]], [[2, 50, 0], [4, 25]], [[2, 50, 1], [4, 60]]]) {
+        reset(completedRunner(), { positions: [position({ volume: 0.5 })], bid: 130, ask: 130.2 });
+        assert.equal(apply(plan(rows)).ok, false);
+    }
+});
+check('future full-exit node can be removed to retain an already reduced runner', () => {
+    reset(state({ stage: 1, be_requested: 1 }), { positions: [position({ volume: 0.5 })], bid: 130, ask: 130.2 });
+    assert.equal(apply(plan([[2, 50, 1]])).ok, true); assert.equal(context.RRStateClosesAll(env.saved[0]), false);
+});
+check('just-reached old full-exit node cannot be deleted to rescue a runner', () => {
+    reset(state({ stage: 1, be_requested: 1 }), { positions: [position({ volume: 0.5 })], bid: 150, ask: 150.2 });
+    assert.equal(apply(plan([[2, 50, 1]])).ok, false);
+});
+check('runner last partial must satisfy current-volume minimum rather than force full close', () => {
+    reset(state(), { positions: [position({ volume: 0.35 })], minimum: 0.1 });
+    assert.equal(apply(plan([[2.5, 70, 1]])).ok, false);
+    reset(state(), { positions: [position({ volume: 0.35 })], minimum: 0.1 });
+    assert.equal(apply(plan([[2.5, 60, 1]])).ok, true);
+});
+check('all-zero BE-only live plan saves without scheduling any reduction', () => {
+    reset(); assert.equal(apply(plan([[2.5, 0, 1], [6, 0, 1]])).ok, true);
+    assert.equal(context.RRStateClosesAll(env.saved[0]), false);
+});
+check('unfinished runner reduction still blocks editing when all targets triggered', () => {
+    reset(completedRunner(), { positions: [position({ volume: 0.7 })], bid: 130, ask: 130.2 });
+    assert.equal(apply(plan([[2, 50, 1], [4, 20]])).ok, false);
+});
+check('near-100 full-exit stage still owes the final lot step and cannot be edited', () => {
+    reset(state({ stage: 2, target_percent: [50, 49.99999995, ...Array(18).fill(0)] }),
+        { positions: [position({ volume: 0.01 })], bid: 145, ask: 145.2 });
+    assert.equal(apply(plan([[2, 50, 1], [5, 49.99999995]])).ok, false);
 });
 
 process.stdout.write(`\n${passed} live-plan tests passed against production APIs.\n`);

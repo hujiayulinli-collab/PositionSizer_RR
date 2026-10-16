@@ -13,7 +13,7 @@ bool CPositionSizeCalculator::CreateRRControls()
     m_BtnRRNewPlan.FontSize(9);
     m_BtnRRPosition.FontSize(9);
     y = (int)MathRound(87 * m_DPIScale);
-    if (!LabelCreate(RRTabList, m_LblRRInfo, x, y, right, y + h, "m_LblRRInfo", "平仓比例按初始仓位，总计须为 100%。")) return false;
+    if (!LabelCreate(RRTabList, m_LblRRInfo, x, y, right, y + h, "m_LblRRInfo", "平仓比例按初始仓位，未安排比例继续保留。")) return false;
     y += (int)MathRound(21 * m_DPIScale);
     if (!LabelCreate(RRTabList, m_LblRRBEInfo, x, y, right, y + h, "m_LblRRBEInfo", "BE = 目标触发时把止损移至开仓价。")) return false;
     y += (int)MathRound(21 * m_DPIScale);
@@ -136,19 +136,17 @@ void CPositionSizeCalculator::UpdateRRModeLabels()
     if (m_rr_position_id == 0)
     {
         m_LblRRMode.Text(RR_Enable ? "新仓方案 · 分仓止盈已启用" : "新仓方案 · RR_Enable 已关闭");
-        m_LblRRInfo.Text("比例按初始仓位，总计 100%；BE 为上保护。");
-        m_LblRRBEInfo.Text("保存仅用于新仓；持仓请点“选择 / 下一持仓”。");
-        m_LblRRPositionInfo.Text("价格为新单预览，持仓按实际成交价计算。");
+        m_LblRRBEInfo.Text("比例按初始仓位；仅勾 BE 的目标触发时上保护。");
         m_BtnRRSave.Text("保存新仓方案");
     }
     else
     {
         m_LblRRMode.Text("持仓 #" + IntegerToString(m_rr_position_id) + (m_rr_readonly ? " · 只读" : ""));
         int digits = (int)SymbolInfoInteger(SymbolForTrading, SYMBOL_DIGITS);
-        m_LblRRInfo.Text("初始 " + DoubleToString(m_rr_state.initial_volume, CountDecimalPlaces(m_rr_state.initial_volume)) + " 手；比例按初始仓位，总计 100%。");
         m_LblRRBEInfo.Text("入场 " + DoubleToString(m_rr_state.entry, digits) + " · 1R " + DoubleToString(m_rr_state.risk, digits));
         m_BtnRRSave.Text("应用到该持仓");
     }
+    RefreshRRPlanSummary();
 }
 
 void CPositionSizeCalculator::OnClickBtnRRNewPlan()
@@ -259,6 +257,51 @@ void CPositionSizeCalculator::RefreshRRTargetPrices()
         m_LblRRPrice[row].Text(label);
         m_LblRRPrice[row].Color(m_rr_position_id != 0 && index < m_rr_live_stage ? clrDimGray : clrDarkSlateGray);
     }
+    RefreshRRPlanSummary();
+}
+
+void CPositionSizeCalculator::RefreshRRPlanSummary()
+{
+    // Read the visible edits directly so a timer updates totals during typing
+    // without capturing unfinished text or replacing any edit/checkbox value.
+    RRPlan summary;
+    ZeroMemory(summary);
+    summary.count = m_rr_count;
+    bool draft = m_rr_dirty || m_rr_stale || m_rr_count != m_rr_loaded_plan.count;
+    for (int index = 0; index < m_rr_count; index++)
+    {
+        string percentage = m_rr_percent[index];
+        int row = index - m_rr_page * 5;
+        if (row >= 0 && row < 5) percentage = m_EdtRRPercent[row].Text();
+        if (m_rr_position_id != 0 && index < m_rr_expected_stage)
+            summary.targets[index].percent = m_rr_loaded_plan.targets[index].percent;
+        else if (!RRPlanParseNumber(percentage, summary.targets[index].percent))
+        {
+            m_LblRRInfo.Text("草稿比例未填完整；已保存方案保持不变。");
+            m_LblRRInfo.Color(clrFireBrick);
+            return;
+        }
+        if (index >= m_rr_loaded_plan.count || summary.targets[index].percent != m_rr_loaded_plan.targets[index].percent) draft = true;
+    }
+    double total = RRPlanTotalPercent(summary);
+    if (total > 100.0000001)
+    {
+        m_LblRRInfo.Text("草稿已安排 " + DoubleToString(total, CountDecimalPlaces(total)) + "% · 超出 100%");
+        m_LblRRInfo.Color(clrFireBrick);
+        return;
+    }
+    double retained = RRPlanClosesAll(summary) ? 0 : MathMax(0.0, 100.0 - total);
+    string label = (draft ? "草稿 " : "已安排 ") + DoubleToString(total, CountDecimalPlaces(total)) + "% / 保留 " + DoubleToString(retained, CountDecimalPlaces(retained)) + "%";
+    if (draft)
+    {
+        double applied = RRPlanTotalPercent(m_rr_loaded_plan);
+        label += "（已用 " + DoubleToString(applied, CountDecimalPlaces(applied)) + "%）";
+    }
+    else if (m_rr_position_id != 0) label += " · 初始 " + DoubleToString(m_rr_state.initial_volume, CountDecimalPlaces(m_rr_state.initial_volume)) + " 手";
+    m_LblRRInfo.Text(label);
+    m_LblRRInfo.Color(clrDarkSlateGray);
+    if (m_rr_position_id == 0)
+        m_LblRRPositionInfo.Text(retained > 0 ? "保留部分不设全平 TP；可手动处理或再加目标。" : "所有目标合计平仓 100%，最后目标为全平 TP。");
 }
 
 void CPositionSizeCalculator::RefreshRRLiveStatus()
@@ -295,9 +338,14 @@ void CPositionSizeCalculator::RefreshRRLiveStatus()
     double volume = PositionGetDouble(POSITION_VOLUME);
     double actual_tp = PositionGetDouble(POSITION_TP);
     double tick = SymbolInfoDouble(SymbolForTrading, SYMBOL_TRADE_TICK_SIZE);
-    double final_price = RRTargetPrice(current.direction, current.entry, current.risk, plan.targets[plan.count - 1].multiple, tick, digits);
-    string tp_status = MathAbs(actual_tp - final_price) < tick * 0.5 ? "TP已同步" : "TP待同步";
-    m_LblRRPositionInfo.Text("余仓 " + DoubleToString(volume, CountDecimalPlaces(volume)) + " 手 · " + tp_status + " " + DoubleToString(actual_tp, digits));
+    string tp_status;
+    if (RRStateClosesAll(current))
+    {
+        double final_price = RRTargetPrice(current.direction, current.entry, current.risk, plan.targets[plan.count - 1].multiple, tick, digits);
+        tp_status = (MathAbs(actual_tp - final_price) < tick * 0.5 ? "TP已同步 " : "TP待同步 ") + DoubleToString(actual_tp, digits);
+    }
+    else tp_status = actual_tp == 0 ? "全平TP已取消" : "旧TP待取消 " + DoubleToString(actual_tp, digits);
+    m_LblRRPositionInfo.Text("余仓 " + DoubleToString(volume, CountDecimalPlaces(volume)) + " 手 · " + tp_status);
     RefreshRRTargetPrices();
 }
 
@@ -450,7 +498,7 @@ void CPositionSizeCalculator::OnClickBtnRRSave()
             SetRRStatus(error, true);
             return;
         }
-        if (LoadRRPositionDraft(m_rr_position_id)) SetRRStatus("持仓方案已保存；最终 TP 待服务器同步。");
+        if (LoadRRPositionDraft(m_rr_position_id)) SetRRStatus(RRPlanClosesAll(draft) ? "持仓方案已保存；最终 TP 待服务器同步。" : "方案已保存；将取消全平 TP，未安排比例继续保留。");
         return;
     }
     if (!RRPlanCanEdit(SymbolForTrading, sets.MagicNumber, error) || !RRPlanApply(draft, error))
@@ -466,5 +514,7 @@ void CPositionSizeCalculator::OnClickBtnRRSave()
     }
     SaveSettingsOnDisk(SymbolForTrading);
     m_rr_dirty = false;
-    SetRRStatus(RR_Enable ? "方案已保存，仅应用于之后的新仓。" : "方案已保存；请开启 RR_Enable 后使用。");
+    m_rr_loaded_plan = draft;
+    RefreshRRPlanSummary();
+    SetRRStatus(!RR_Enable ? "方案已保存；请开启 RR_Enable 后使用。" : (RRPlanClosesAll(draft) ? "方案已保存，仅应用于之后的新仓。" : "新仓方案已保存；保留余仓，不设置全平 TP。"));
 }

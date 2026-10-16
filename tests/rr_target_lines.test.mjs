@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 const source = readFileSync(new URL('../mt5/RRTargetLines.mqh', import.meta.url), 'utf8');
 const core = readFileSync(new URL('../mt5/RRCore.mqh', import.meta.url), 'utf8');
+const planSource = readFileSync(new URL('../mt5/RRPlan.mqh', import.meta.url), 'utf8');
 function extract(text, name) {
     const signature = new RegExp(`(?:void|bool|double|string|color|int) ${name}\\(([^)]*)\\)\\s*\\{`).exec(text);
     assert.ok(signature, name);
@@ -49,6 +50,7 @@ function fixture() {
             Object.assign(state, structuredClone(p.state)); return true;
         },
         RRStatePlan: (state, target) => Object.assign(target, structuredClone(state.plan)),
+        RRStateClosesAll: state => state.version === 1 || ctx.RRPlanClosesAll(state.plan),
         RRTargetColor: (hit, be, preview) => ({ hit, be, preview }),
         RRDrawTarget: (key, price, caption, color, hit) => {
             ctx.rows.push({ key, price, caption, color, hit });
@@ -60,6 +62,7 @@ function fixture() {
     };
     vm.createContext(ctx);
     vm.runInContext(extract(core, 'RRTargetPrice'), ctx);
+    for (const name of ['RRPlanTotalPercent', 'RRPlanClosesAll']) vm.runInContext(extract(planSource, name), ctx);
     for (const name of ['RRCompactNumber', 'RRTargetCaption', 'RRDeleteTargetLines', 'RRPlaceTargetLabel', 'RRPruneTargetRows', 'RRRefreshTargetLines'])
         vm.runInContext(extract(source, name), ctx);
     ctx.refresh = () => { ctx.rows = []; ctx.RRRefreshTargetLines('XAUUSD', 123, 4336.71, 4349.42, -1, true); };
@@ -145,5 +148,31 @@ check('twenty close or offscreen target labels occupy separate visible rows', ()
 check('chart module contains no trade or journal write actions', () => {
     assert.doesNotMatch(source, /\b(?:OrderSend|OrderCheck|RRSave|RRClose|FileWriteStruct|RRApplyPositionPlan)\s*\(/);
     assert.match(source, /OBJPROP_SELECTABLE, false/);
+});
+check('runner final partial target never claims a full server TP', () => {
+    const s = fixture(); const p = s.position(); p.state.plan.targets[1].percent = 25; p.tp = 0;
+    s.positions.push(p); s.refresh();
+    assert.match(s.rows[1].caption, /平 25%.*计划后保留 25%.*无全平TP/);
+    assert.doesNotMatch(s.rows[1].caption, /服务器TP|最终TP待同步/);
+});
+check('old full TP is explicitly pending cancellation on a saved runner', () => {
+    const s = fixture(); const p = s.position(); p.state.plan.targets[1].percent = 25;
+    s.positions.push(p); s.refresh();
+    assert.match(s.rows[1].caption, /旧TP待取消 4303.34/);
+    assert.doesNotMatch(s.rows[1].caption, /无全平TP/);
+});
+check('runner retains completed target marks after all targets have triggered', () => {
+    const s = fixture(); const p = s.position(); p.state.plan.targets[1].percent = 25; p.state.stage = 2; p.tp = 0;
+    s.positions.push(p); s.refresh();
+    assert.ok(s.rows.every(r => r.hit)); assert.match(s.rows[1].caption, /已触发.*计划后保留 25%/);
+});
+check('new runner preview clearly shows retained share', () => {
+    const s = fixture(); s.RRActivePlan.targets[1].percent = 25; s.refresh();
+    assert.match(s.rows[1].caption, /新仓预览.*计划后保留 25%/);
+});
+check('BE-only runner labels show no invented forced close', () => {
+    const s = fixture(); const p = s.position(); p.state.plan = { count: 1, targets: [{ multiple: 2, percent: 0, move_be: 1 }] }; p.tp = 0;
+    s.positions.push(p); s.refresh();
+    assert.match(s.rows[0].caption, /平 0% \+ BE.*保留 100%.*无全平TP/);
 });
 console.log(`${count} chart annotations checks passed`);

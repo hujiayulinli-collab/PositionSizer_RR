@@ -6,6 +6,14 @@
 
 #include "errordescription.mqh"
 
+// The last planned partial exit is only a local EA condition. A broker TP
+// would close the entire runner before that partial-close logic can preserve it.
+double RRNewOrderTakeProfit(const double preview_tp)
+{
+    if (RR_Enable && !RRPlanClosesAll(RRActivePlan)) return 0;
+    return preview_tp;
+}
+
 bool RRNettingSlotAvailable()
 {
     if ((!RR_Enable) || (AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)) return true;
@@ -163,7 +171,7 @@ void Trade()
             Print(TRANSLATION_MESSAGE_NETTING_MODE_DETECTED);
         }
         // No multiple TPs, use single TP for 100% of volume.
-        TP[0] = sets.TakeProfitLevel;
+        TP[0] = RRNewOrderTakeProfit(sets.TakeProfitLevel);
         TPShare[0] = 100;
     }
 
@@ -509,7 +517,7 @@ void Trade()
             PositionSizeToArray(PositionSize);
         }
        
-        if ((sets.AskForConfirmation) && (!CheckConfirmation(ot, PositionSize, sets.StopLossLevel, sets.TakeProfitLevel, expiry)))
+        if ((sets.AskForConfirmation) && (!CheckConfirmation(ot, PositionSize, sets.StopLossLevel, RRNewOrderTakeProfit(sets.TakeProfitLevel), expiry)))
         {
             delete Trade;
             return;
@@ -624,7 +632,7 @@ void Trade()
             PositionSizeToArray(PositionSize);
         }
         
-        if ((sets.AskForConfirmation) && (!CheckConfirmation(ot, PositionSize, sets.StopLossLevel, sets.TakeProfitLevel)))
+        if ((sets.AskForConfirmation) && (!CheckConfirmation(ot, PositionSize, sets.StopLossLevel, RRNewOrderTakeProfit(sets.TakeProfitLevel))))
         {
             delete Trade;
             return;
@@ -902,9 +910,15 @@ bool CheckConfirmation(const ENUM_ORDER_TYPE ot, const double PositionSize, cons
     if (sets.EntryType == StopLimit) message += TRANSLATION_LABEL_STOPPRICE + ": " + DoubleToString(sets.StopPriceLevel, _Digits) + "\n";
     message += TRANSLATION_LABEL_ENTRY + ": " + DoubleToString(sets.EntryLevel, _Digits) + "\n";
     if (!sets.DoNotApplyStopLoss) message += TRANSLATION_LABEL_STOPLOSS + ": " + DoubleToString(sets.StopLossLevel, _Digits) + "\n";
-    if ((sets.TakeProfitLevel > 0) && (!sets.DoNotApplyTakeProfit))
+    if (RR_Enable && !RRPlanClosesAll(RRActivePlan))
     {
-        message += TRANSLATION_LABEL_TAKEPROFIT + ": " + DoubleToString(sets.TakeProfitLevel, _Digits);
+        message += "分仓计划平 " + DoubleToString(RRPlanTotalPercent(RRActivePlan), 2)
+            + "% / 保留 " + DoubleToString(100.0 - RRPlanTotalPercent(RRActivePlan), 2) + "%\n";
+        message += "保留余仓：不设置服务器全平 TP；BE 按勾选目标触发。\n";
+    }
+    else if ((tp > 0) && (!sets.DoNotApplyTakeProfit))
+    {
+        message += TRANSLATION_LABEL_TAKEPROFIT + ": " + DoubleToString(tp, _Digits);
         if (sets.TakeProfitsNumber > 1) message += " (" + TRANSLATION_MESSAGE_MULTIPLE + ")";
         message += "\n";
     }

@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('../mt5/Position Sizer RR.mqh', import.meta.url), 'utf8');
+const planSource = readFileSync(new URL('../mt5/RRPlan.mqh', import.meta.url), 'utf8');
 const maxTargets = 20;
 const widths = { uint: 4, int: 4, long: 8, ulong: 8, double: 8 };
 function schema(name) {
@@ -56,22 +57,22 @@ function decode(buffer, name) {
     }
     return record;
 }
-function extract(name) {
-    const match = new RegExp(`(?:void|bool|uint)\\s+${name}\\s*\\(([^)]*)\\)\\s*\\{`).exec(source);
+function extract(name, bodySource = source) {
+    const match = new RegExp(`(?:void|bool|uint)\\s+${name}\\s*\\(([^)]*)\\)\\s*\\{`).exec(bodySource);
     assert.ok(match, `Missing production function ${name}`);
     let depth = 1;
     const start = match.index + match[0].length;
     let end = start;
-    for (; end < source.length && depth; end++) {
-        if (source[end] === '{') depth++;
-        if (source[end] === '}') depth--;
+    for (; end < bodySource.length && depth; end++) {
+        if (bodySource[end] === '{') depth++;
+        if (bodySource[end] === '}') depth--;
     }
     const args = match[1].split(',').map(arg => {
-        const found = /^\s*(?:const\s+)?(?:int|ulong|string|RRState|RRLegacyState)\s*&?\s*(\w+)\s*$/.exec(arg);
+        const found = /^\s*(?:const\s+)?(?:int|ulong|string|RRState|RRLegacyState|RRPlan)\s*&?\s*(\w+)\s*$/.exec(arg);
         assert.ok(found, `Unsupported argument in ${name}: ${arg}`);
         return found[1];
     });
-    const body = source.slice(start, end - 1)
+    const body = bodySource.slice(start, end - 1)
         .replace(/\b(RRState|RRLegacyState|RRPlan)\s+(\w+)\s*;/g, 'let $2 = __struct("$1");')
         .replace(/\b(?:uint|ulong|long|int|double|string)\s+(?=[A-Za-z_]\w*\s*(?:=|;))/g, 'let ')
         .replace(/sizeof\(uint\)/g, '4')
@@ -96,7 +97,7 @@ const context = vm.createContext({
         let next = 0;
         return template.replace(/%I64[ud]|%[ud]/g, () => String(args[next++]));
     },
-    RRPlanValidate: () => env.planValid,
+    RRPlanValidate: (plan, error) => env.planValid && context.RRPlanValidateActual(plan, error),
     RRNotice: message => env.notices.push(message),
     ResetLastError: () => { env.error = 0; },
     GetLastError: () => env.error,
@@ -131,7 +132,9 @@ const context = vm.createContext({
     },
     FileFlush: () => { if (env.flushFails) env.error = 5001; },
 });
-vm.runInContext(['RRHash', 'RRChecksum', 'RRFromLegacy', 'RRToLegacy', 'RRSave', 'RRLoad'].map(extract).join('\n'), context);
+vm.runInContext(extract('RRPlanValidate', planSource).replace('function RRPlanValidate(', 'function RRPlanValidateActual('), context);
+vm.runInContext(['RRHash', 'RRChecksum', 'RRFromLegacy', 'RRToLegacy', 'RRSave', 'RRLoad', 'RRStateClosesAll']
+    .map(name => extract(name)).join('\n'), context);
 
 function reset(overrides = {}) {
     env = { bytes: Buffer.alloc(0), cursor: 0, error: 0, seekFails: false, shortWrite: false,
@@ -269,6 +272,47 @@ check('flush error prevents reporting a successful state save', () => {
 });
 check('seek failure does not append or claim success', () => {
     env.seekFails = true; save(state(2), false); assert.equal(env.bytes.length, 0);
+});
+
+check('runner journal reload retains completed stages and remaining allocation', () => {
+    const s = state(2, { stage: 3, be_requested: 1 });
+    s.target_percent.splice(0, 3, 0, 30, 20); save(s);
+    const restored = load();
+    assert.deepEqual(restored, s); assert.equal(context.RRStateClosesAll(restored), false);
+    assert.equal(restored.initial_volume, 1); assert.equal(restored.stage, restored.target_count);
+});
+check('all-zero BE-only plan survives binary save/load with no implicit full exit', () => {
+    const s = state(2, { stage: 3, be_requested: 1 });
+    s.target_percent.splice(0, 3, 0, 0, 0); s.target_be.splice(0, 3, 1, 1, 1); save(s);
+    assert.deepEqual(load(), s); assert.equal(context.RRStateClosesAll(load()), false);
+});
+check('runner journal may end in a zero-percent BE target', () => {
+    const s = state(2, { stage: 3, be_requested: 1 });
+    s.target_percent.splice(0, 3, 0, 50, 0); s.target_be.splice(0, 3, 1, 0, 1); save(s);
+    assert.equal(context.RRStateClosesAll(load()), false);
+});
+check('runner pending partial close and stop retry timestamps survive restart', () => {
+    const s = state(2, { stage: 3, pending: 1, pending_order: 210, before_volume: 0.8,
+        be_requested: 1, last_request: 100, last_stop_request: 103 });
+    s.target_percent.splice(0, 3, 0, 30, 20); save(s);
+    const restored = load();
+    assert.equal(restored.pending, 1); assert.equal(restored.pending_order, 210);
+    assert.equal(restored.last_stop_request, 103); assert.equal(restored.be_requested, 1);
+});
+check('an appended runner target is read from latest record without losing prior stage', () => {
+    const s = state(2, { stage: 3, be_requested: 1 });
+    s.target_percent.splice(0, 3, 0, 30, 20); save(s);
+    s.target_count = 4; s.target_r[3] = 7; s.target_percent[3] = 50; s.final_r = 7; save(s);
+    const restored = load();
+    assert.equal(restored.stage, 3); assert.equal(restored.target_count, 4);
+    assert.equal(restored.initial_volume, 1); assert.equal(context.RRStateClosesAll(restored), true);
+});
+check('actual plan validation rejects journal percentages exceeding 100', () => {
+    const s = state(2); s.target_percent.splice(0, 3, 0, 60, 60); save(s); load(false);
+});
+check('released v1 and full-exit v2 records retain full-exit interpretation', () => {
+    const legacy = state(1); save(legacy); assert.equal(context.RRStateClosesAll(load()), true);
+    reset(); const full = state(2); save(full); assert.equal(context.RRStateClosesAll(load()), true);
 });
 
 process.stdout.write(`\n${passed} journal tests passed against production save/load and conversion functions.\n`);

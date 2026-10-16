@@ -47,6 +47,7 @@ const constants = ['POSITION_VOLUME', 'POSITION_PRICE_OPEN', 'POSITION_TYPE', 'P
     'POSITION_SYMBOL', 'ORDER_SYMBOL', 'ORDER_SL', 'FILE_READ', 'FILE_BIN', 'INVALID_HANDLE'];
 let env;
 const context = vm.createContext({
+    RR_MAX_TARGETS: 20,
     ...Object.fromEntries(constants.map(name => [name, name])),
     MathFloor: Math.floor, MathCeil: Math.ceil, MathAbs: Math.abs, MathMax: Math.max, MathIsValidNumber: Number.isFinite,
     NormalizeDouble: (value, digits) => Number(value.toFixed(digits)),
@@ -136,7 +137,7 @@ const context = vm.createContext({
 vm.runInContext([
     extract(core, 'RRPriceR'), extract(core, 'RRPartialLots'), extract(core, 'RRTargetReached'),
     extract(core, 'RRTargetPrice'), extract(core, 'RRBETarget'), extract(core, 'RRSLProtectsBE'),
-    extract(manager, 'RRResolvePending'), extract(manager, 'RRProcessMulti'), extract(manager, 'RRProcess'),
+    extract(manager, 'RRStateClosesAll'), extract(manager, 'RRResolvePending'), extract(manager, 'RRProcessMulti'), extract(manager, 'RRProcess'),
     extract(manager, 'RRPlanCanEdit'), extract(manager, 'RRCapture'),
     extract(manager, 'RRUpdateStops').replace('function RRUpdateStops(', 'function RRUpdateStopsActual('),
 ].join('\n'), context);
@@ -598,6 +599,93 @@ check('edited future plan executes new target and retains initial-volume basis',
 check('edited final TP synchronizes through existing stop flow and preserves SL', () => {
     const result = runStops(multiState({ final_r: 6, stage: 1, be_requested: 1 }), { sl: 102, tp: 150 });
     assert.equal(result.sent[0].tp, 160); assert.equal(result.sent[0].sl, 102);
+});
+
+function runner(overrides = {}) {
+    return multiState({ target_count: 2, target_r: [2, 5], target_percent: [30, 20], target_be: [1, 0],
+        first_r: 2, final_r: 5, percent: 30, ...overrides });
+}
+check('runner last target closes only allocated cumulative share', () => {
+    const s = runner(); const result = run(s, { bid: 155, ask: 155.2 });
+    assert.equal(s.stage, 2); assert.equal(result.closes[0].volume, 0.5); assert.equal(s.be_requested, 1);
+});
+check('runner single 50 percent target does not close the entire position', () => {
+    const s = runner({ target_count: 1, target_r: [2], target_percent: [50], target_be: [1], final_r: 2 });
+    const result = run(s, { bid: 120, ask: 120.2 });
+    assert.equal(s.stage, 1); assert.equal(result.closes[0].volume, 0.5);
+});
+check('completed runner remains open on repeated ticks and beyond last target', () => {
+    const s = runner({ stage: 2, be_requested: 1 });
+    for (const bid of [160, 200, 110]) {
+        const result = run(s, { bid, ask: bid + 0.2, volume: 0.5 });
+        assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 1);
+    }
+});
+check('runner last target tops up only cumulative quantity after earlier and manual reductions', () => {
+    const s = runner({ stage: 1, be_requested: 1 });
+    const result = run(s, { bid: 150, ask: 150.2, volume: 0.6 });
+    assert.equal(result.closes[0].volume, 0.1); assert.equal(s.stage, 2);
+});
+check('runner already manually reduced beyond plan never reduces again', () => {
+    const result = run(runner({ stage: 2, be_requested: 1 }), { bid: 180, ask: 180.2, volume: 0.4 });
+    assert.equal(result.closes.length, 0);
+});
+check('runner fractional final percentage rounds down and leaves one lot step', () => {
+    const s = runner({ initial_volume: 0.03, target_percent: [34, 33], stage: 1, be_requested: 1 });
+    const result = run(s, { bid: 150, ask: 150.2, volume: 0.02, inVolume: 0.03 });
+    assert.equal(result.closes[0].volume, 0.01);
+});
+check('all-zero BE-only runner never submits a close even after every target', () => {
+    const s = runner({ target_percent: [0, 0], target_be: [1, 1] });
+    const result = run(s, { bid: 180, ask: 180.2 });
+    assert.equal(s.stage, 2); assert.equal(s.be_requested, 1); assert.equal(result.closes.length, 0);
+});
+check('runner final BE-only node keeps the earlier cumulative close goal', () => {
+    const s = runner({ target_percent: [50, 0], target_be: [0, 1], stage: 1 });
+    const result = run(s, { bid: 150, ask: 150.2, volume: 0.5 });
+    assert.equal(s.be_requested, 1); assert.equal(s.stage, 2); assert.equal(result.closes.length, 0);
+});
+check('runner pending close confirms without turning last target into a full exit', () => {
+    const s = runner({ stage: 2, be_requested: 1, pending: 1, pending_order: 200, before_volume: 1 });
+    const result = run(s, { volume: 0.5, bid: 160, ask: 160.2, orders: [filledOrder()] });
+    assert.equal(s.pending, 0); assert.equal(result.closes.length, 0);
+});
+check('runner removes old full-exit server TP while retaining initial SL', () => {
+    const result = runStops(runner(), { sl: 90, tp: 150 });
+    assert.equal(result.sent[0].tp, 0); assert.equal(result.sent[0].sl, 90);
+});
+check('runner TP clearing can accompany BE without loosening an existing better SL', () => {
+    const result = runStops(runner({ stage: 2, be_requested: 1 }), { sl: 102, tp: 150, bid: 160, ask: 160.2 });
+    assert.equal(result.sent[0].tp, 0); assert.equal(result.sent[0].sl, 102);
+});
+check('runner TP clearing is not blocked by target distance or opposite side math', () => {
+    const result = runStops(runner({ direction: -1 }), { direction: -1, sl: 110, tp: 50,
+        bid: 50.1, ask: 50.3, stopsLevel: 500, freezeLevel: 500 });
+    assert.equal(result.sent[0].tp, 0); assert.equal(result.sent[0].sl, 110);
+});
+check('runner no-TP state does not repeatedly write or send while BE already protected', () => {
+    const result = runStops(runner({ stage: 2, be_requested: 1 }), { sl: 100, tp: 0 });
+    assert.equal(result.sent.length, 0); assert.equal(result.saveAttempts, 0);
+});
+check('runner clearing failure remains retryable and is throttled', () => {
+    const s = runner();
+    const first = runStops(s, { sl: 90, tp: 150, retcode: 'TRADE_RETCODE_REJECT', sendSuccess: false, now: 100 });
+    assert.equal(first.sent[0].tp, 0); assert.equal(s.last_stop_request, 100);
+    assert.equal(runStops(s, { sl: 90, tp: 150, now: 101 }).sent.length, 0);
+    assert.equal(runStops(s, { sl: 90, tp: 150, now: 104 }).sent[0].tp, 0);
+});
+check('runner TP clear waits for trading permission and persistent intent', () => {
+    assert.equal(runStops(runner(), { canTrade: false, tp: 150 }).sent.length, 0);
+    assert.equal(runStops(runner(), { saveFails: true, tp: 150 }).sent.length, 0);
+});
+check('legacy remains a full-exit plan regardless of absent v2 percentage arrays', () => {
+    assert.equal(context.RRStateClosesAll(state()), true);
+    const result = runStops(state(), { tp: 0 }); assert.equal(result.sent[0].tp, 150);
+});
+check('previously valid near-100 v2 plan still closes the exact remainder', () => {
+    const s = runner({ target_percent: [30, 69.99999995] });
+    assert.equal(context.RRStateClosesAll(s), true);
+    assert.equal(run(s, { bid: 150, ask: 150.2, volume: 0.65 }).closes[0].volume, 0.65);
 });
 
 process.stdout.write(`\n${passed} manager tests passed against production RRProcess/RRProcessMulti/RRResolvePending/RRUpdateStops/RRCapture/RRPlanCanEdit.\n`);

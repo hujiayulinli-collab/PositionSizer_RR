@@ -158,15 +158,22 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
         RRStatePlan(state, plan);
         if (!PositionSelectByTicket(ticket)) continue;
         double tp = PositionGetDouble(POSITION_TP);
-        double final_price = RRTargetPrice(state.direction, state.entry, state.risk, state.final_r, tick_size, digits);
-        bool tp_pending = MathAbs(tp - final_price) > tick_size * 0.1;
+        bool closes_all = RRStateClosesAll(state);
+        double final_price = closes_all ? RRTargetPrice(state.direction, state.entry, state.risk, state.final_r, tick_size, digits) : 0;
+        bool tp_pending = closes_all ? MathAbs(tp - final_price) > tick_size * 0.1 : tp != 0;
         string owner = "#" + IntegerToString(id);
         for (int i = 0; i < plan.count; i++)
         {
             double price = RRTargetPrice(state.direction, state.entry, state.risk, plan.targets[i].multiple, tick_size, digits);
             bool hit = state.version == 2 ? i < state.stage : (i == 0 ? state.stage >= 1 : state.stage >= 3);
             string caption = RRTargetCaption(owner, i, plan.targets[i].multiple, plan.targets[i].percent,
-                plan.targets[i].move_be != 0, price, digits, hit, i == plan.count - 1, tp_pending, state.blocked != 0 || !RR_Enable);
+                plan.targets[i].move_be != 0, price, digits, hit, closes_all && i == plan.count - 1, tp_pending, state.blocked != 0 || !RR_Enable);
+            if (!closes_all && i == plan.count - 1)
+            {
+                caption += " [计划后保留 " + RRCompactNumber(100.0 - RRPlanTotalPercent(plan)) + "%]";
+                if (tp_pending) caption += " [旧TP待取消 " + DoubleToString(tp, digits) + "]";
+                else caption += " [无全平TP]";
+            }
             RRDrawTarget(prefix + IntegerToString(i), price, caption,
                 RRTargetColor(hit, plan.targets[i].move_be != 0, false), hit, ordinal++);
         }
@@ -184,6 +191,8 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
                 RRActivePlan.targets[i].multiple, tick_size, digits);
             string caption = RRTargetCaption("新仓预览", i, RRActivePlan.targets[i].multiple,
                 RRActivePlan.targets[i].percent, RRActivePlan.targets[i].move_be != 0, price, digits, false, false, false, false);
+            if (!RRPlanClosesAll(RRActivePlan) && i == RRActivePlan.count - 1)
+                caption += " [计划后保留 " + RRCompactNumber(100.0 - RRPlanTotalPercent(RRActivePlan)) + "%]";
             RRDrawTarget(prefix + IntegerToString(i), price, caption, RRTargetColor(false, false, true), false, ordinal++);
         }
         RRPruneTargetRows(prefix, RRActivePlan.count);

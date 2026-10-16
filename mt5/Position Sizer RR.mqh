@@ -76,6 +76,15 @@ struct RRState
     int be_requested;
 };
 
+bool RRStateClosesAll(const RRState &s)
+{
+    if (s.version == 1) return true; // Never change legacy execution semantics.
+    if (s.version != 2 || s.target_count < 1 || s.target_count > RR_MAX_TARGETS) return false;
+    double total = 0;
+    for (int i = 0; i < s.target_count; i++) total += s.target_percent[i];
+    return total >= 100.0 - 1e-7;
+}
+
 void RRFromLegacy(const RRLegacyState &legacy, RRState &s)
 {
     ZeroMemory(s);
@@ -202,7 +211,8 @@ bool RRValidateInputs()
         return false;
     }
     if (RR_Enable)
-        PrintFormat("[PS RR] 已启用 %d 个止盈目标，最终 %.2fR 全平。每个新仓冻结开仓时的方案。", RRActivePlan.count, RRPlanFinalR());
+        PrintFormat("[PS RR] 已启用 %d 个止盈目标，合计 %.4f%%，最后 %.2fR，%s。每个新仓冻结开仓时的方案。",
+            RRActivePlan.count, RRPlanTotalPercent(RRActivePlan), RRPlanFinalR(), RRPlanClosesAll(RRActivePlan) ? "全部退出" : "保留余仓继续持有");
     return true;
 }
 
@@ -508,9 +518,13 @@ void RRUpdateStops(const int handle, RRState &s, const ulong ticket, const strin
     double old_tp = PositionGetDouble(POSITION_TP);
     double sl = old_sl;
     double tp = old_tp;
-    double desired_tp = RRTargetPrice(s.direction, s.entry, s.risk, s.final_r, tick_size, digits);
+    bool closes_all = RRStateClosesAll(s);
+    double desired_tp = closes_all ? RRTargetPrice(s.direction, s.entry, s.risk, s.final_r, tick_size, digits) : 0;
     double distance = (double)MathMax(SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL), SymbolInfoInteger(symbol, SYMBOL_TRADE_FREEZE_LEVEL)) * point + tick_size;
-    if (MathAbs(old_tp - desired_tp) > tick_size * 0.1 && s.direction * (desired_tp - current_price) >= distance)
+    // A retained remainder must not keep a server TP that would close it all.
+    // Clearing TP is retried by the same idempotent SL/TP synchronization path.
+    if (!closes_all) tp = 0;
+    else if (MathAbs(old_tp - desired_tp) > tick_size * 0.1 && s.direction * (desired_tp - current_price) >= distance)
         tp = desired_tp;
     if ((s.version == 1 && s.stage >= 2 && s.move_be != 0) || (s.version == 2 && s.be_requested != 0))
     {
@@ -582,7 +596,7 @@ void RRProcessMulti(const int handle, RRState &s, const ulong ticket, const stri
     if (!RRResolvePending(handle, s, volume, step)) return;
     if (!PositionSelectByTicket(ticket)) return;
     volume = PositionGetDouble(POSITION_VOLUME);
-    if (s.stage == s.target_count)
+    if (s.stage == s.target_count && RRStateClosesAll(s))
     {
         RRClose(handle, s, ticket, symbol, volume);
         return;
@@ -793,8 +807,8 @@ bool RRApplyPositionPlanLocked(const int handle, RRState &s, const ulong ticket,
     if (s.stage != expected_stage || RRPlanChecksum(previous) != expected_plan_checksum)
     { error = "持仓方案或触发阶段已变化，请重新加载后编辑。"; return false; }
     if (!RRPlanValidate(plan, error)) return false;
-    if (plan.count <= s.stage)
-    { error = "已触发目标不能删除，且持仓必须保留尚未触发的最终目标。"; return false; }
+    if (plan.count < s.stage)
+    { error = "已触发目标不能删除；余仓可以继续持有，也可以添加后续目标。"; return false; }
     for (int i = 0; i < s.stage; i++)
         if (plan.targets[i].multiple != s.target_r[i] || plan.targets[i].percent != s.target_percent[i] || plan.targets[i].move_be != s.target_be[i])
         { error = StringFormat("第 %d 行已触发，不能修改或删除。", i + 1); return false; }
@@ -822,20 +836,23 @@ bool RRApplyPositionPlanLocked(const int handle, RRState &s, const ulong ticket,
     double cumulative = 0;
     for (int i = 0; i < s.stage; i++) cumulative += s.target_percent[i];
     double closed = MathMax(0.0, s.initial_volume - volume);
-    double reached_goal = MathFloor(s.initial_volume * cumulative / 100.0 / step + 1e-8) * step;
+    double reached_goal = (s.stage == s.target_count && RRStateClosesAll(s) ? s.initial_volume
+        : MathFloor(s.initial_volume * cumulative / 100.0 / step + 1e-8) * step);
     if (closed < reached_goal - step * 0.1)
     { error = "已触发阶段的减仓尚未完成，请处理完成后重新加载。"; return false; }
     // Simulate only future cumulative reductions from the ACTUAL remaining
     // volume. Earlier manual reductions count toward every later target.
+    bool closes_all = RRPlanClosesAll(plan);
     for (int i = s.stage; i < plan.count; i++)
     {
         cumulative += plan.targets[i].percent;
         if (plan.targets[i].percent == 0) continue;
-        double goal = (i == plan.count - 1 ? s.initial_volume : MathFloor(s.initial_volume * cumulative / 100.0 / step + 1e-8) * step);
+        bool final_exit = closes_all && i == plan.count - 1;
+        double goal = (final_exit ? s.initial_volume : MathFloor(s.initial_volume * cumulative / 100.0 / step + 1e-8) * step);
         double close_volume = goal - closed;
         if (close_volume <= step * 0.1) continue;
         double remainder = s.initial_volume - goal;
-        if (close_volume < minimum - step * 1e-6 || (i < plan.count - 1 && remainder < minimum - step * 1e-6))
+        if (close_volume < minimum - step * 1e-6 || (!final_exit && remainder < minimum - step * 1e-6))
         { error = StringFormat("第 %d 行：按当前余仓计算的减仓量或余仓小于券商最小手数，请调整比例。", i + 1); return false; }
         closed = goal;
     }
@@ -857,7 +874,8 @@ bool RRApplyPositionPlanLocked(const int handle, RRState &s, const ulong ticket,
     if (!RRSave(handle, updated))
     { error = "保存失败，无法确认新方案已持久化；请检查专家日志后再操作。"; return false; }
     s = updated;
-    PrintFormat("[PS RR] 仓位 %I64u 已保存新方案，已触发 %d/%d；最终 TP 将由管理流程同步。", s.identifier, s.stage, s.target_count);
+    PrintFormat("[PS RR] 仓位 %I64u 已保存新方案，已触发 %d/%d；%s。", s.identifier, s.stage, s.target_count,
+        RRStateClosesAll(s) ? "全平 TP 将由管理流程同步" : "保留余仓，服务器全平 TP 将由管理流程清除");
     error = "";
     return true;
 }

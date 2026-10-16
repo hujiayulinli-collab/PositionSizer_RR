@@ -163,6 +163,7 @@ private:
     void             CaptureRRPage();
     void             RenderRRPage();
     void             RefreshRRTargetPrices();
+    void             RefreshRRPlanSummary();
     void             UpdateRRModeLabels();
     void             OnClickBtnRRNewPlan();
     void             OnClickBtnRRPosition();
@@ -2516,6 +2517,10 @@ void CPositionSizeCalculator::RefreshValues()
         m_EdtTP.ReadOnly(true);
         m_EdtTPMultiplier.ReadOnly(true);
         m_EdtTPMultiplier.Text(DoubleToString(RRPlanFinalR(), CountDecimalPlaces(RRPlanFinalR())));
+        bool runner = !RRPlanClosesAll(RRActivePlan);
+        m_BtnTakeProfit.Text(runner ? "末目标" : TRANSLATION_BUTTON_TP + " x");
+        ObjectSetString(ChartID(), m_name + "m_EdtTP", OBJPROP_TOOLTIP,
+            runner ? "最后计划目标的预览价；保留余仓模式不设置服务器全平 TP。" : "新仓最终 TP 预览价。");
         ObjectSetInteger(ChartID(), ObjectPrefix + "TakeProfitLine", OBJPROP_SELECTED, false);
         ObjectSetInteger(ChartID(), ObjectPrefix + "TakeProfitLine", OBJPROP_SELECTABLE, false);
     }
@@ -2764,7 +2769,8 @@ void CPositionSizeCalculator::ProcessTPChange(const bool tp_button_click)
     if (RR_Enable)
     {
         // The RR manager uses the original price risk, excluding costs.
-        // Keep the panel and the server TP on the same final target.
+        // Preview the last planned target. A runner has no full-position server
+        // TP; the entry path explicitly sends TP=0 for that plan.
         tp_distance = (tEntryLevel - tStopLossLevel) * RRPlanFinalR();
     }
     else if ((UseCommissionToSetTPDistance) && (sets.CommissionPerLot != 0))

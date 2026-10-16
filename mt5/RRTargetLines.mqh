@@ -1,4 +1,4 @@
-// Chart annotations are read-only views of the saved plan. Never trade here.
+// Saved-plan annotations. Eligible target lines delegate edits to RRTargetDrag.
 #ifndef PS_RR_TARGET_LINES_MQH
 #define PS_RR_TARGET_LINES_MQH
 
@@ -35,6 +35,7 @@ void RRDeleteTargetLines()
     ObjectsDeleteAll(ChartID(), RRLinePrefix);
     RRLastLineRefresh = 0;
     ArrayResize(RRLabelRows, 0);
+    RRResetDragLines();
 }
 
 int RRPlaceTargetLabel(const int desired_y, const int height)
@@ -74,21 +75,26 @@ color RRTargetColor(const bool triggered, const bool be, const bool preview)
 }
 
 void RRDrawTarget(const string key, const double price, const string caption,
-                  const color shade, const bool triggered, const int ordinal)
+                  const color shade, const bool triggered, const int ordinal, const bool editable = false)
 {
     long chart = ChartID();
     string line = key + "_Line";
-    if (ObjectFind(chart, line) < 0 && !ObjectCreate(chart, line, OBJ_HLINE, 0, 0, price)) return;
-    ObjectSetDouble(chart, line, OBJPROP_PRICE, price);
+    bool created = ObjectFind(chart, line) < 0;
+    if (created && !ObjectCreate(chart, line, OBJ_HLINE, 0, 0, price)) return;
+    bool selected = !created && ObjectGetInteger(chart, line, OBJPROP_SELECTED);
+    if (!editable || (!selected && !RRTargetLineEditing(line))) ObjectSetDouble(chart, line, OBJPROP_PRICE, price);
     ObjectSetInteger(chart, line, OBJPROP_COLOR, shade);
     ObjectSetInteger(chart, line, OBJPROP_STYLE, triggered ? STYLE_DOT : STYLE_DASH);
     ObjectSetInteger(chart, line, OBJPROP_WIDTH, 1);
-    ObjectSetInteger(chart, line, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(chart, line, OBJPROP_SELECTED, false);
-    ObjectSetInteger(chart, line, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(chart, line, OBJPROP_BACK, true);
+    ObjectSetInteger(chart, line, OBJPROP_SELECTABLE, editable);
+    if (created || !editable) ObjectSetInteger(chart, line, OBJPROP_SELECTED, false);
+    ObjectSetInteger(chart, line, OBJPROP_HIDDEN, !editable);
+    ObjectSetInteger(chart, line, OBJPROP_BACK, !editable);
+    ObjectSetInteger(chart, line, OBJPROP_ZORDER, RRTargetLinePriority(line));
     ObjectSetString(chart, line, OBJPROP_TEXT, caption);
-    ObjectSetString(chart, line, OBJPROP_TOOLTIP, caption + "\n在分仓止盈页选择对应持仓修改；目标线不可拖动。");
+    ObjectSetString(chart, line, OBJPROP_TOOLTIP, caption + (editable
+        ? "\n双击选中后拖动，松开即保存；也可在线属性中填写价格。只修改此目标，比例与BE不变。同价重合时先在分仓止盈页选择持仓；对象列表按编号也可定位。"
+        : "\n此目标仅供查看（新仓预览、已触发目标或管理暂停时不可拖动）。"));
 
     string label = key + "_Label";
     if (ObjectFind(chart, label) < 0 && !ObjectCreate(chart, label, OBJ_LABEL, 0, 0, 0)) return;
@@ -149,6 +155,7 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
         if (ticket == 0 || PositionGetString(POSITION_SYMBOL) != symbol) continue;
         long position_magic = PositionGetInteger(POSITION_MAGIC);
         ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
+        if (RBIsChild(id)) continue;
         if (!FileIsExist(RRFileName(id))) continue;
         string prefix = RRLinePrefix + IntegerToString(id) + "_";
         ArrayResize(retained, owners + 1);
@@ -166,6 +173,8 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
         double final_price = closes_all ? RRTargetPrice(state.direction, state.entry, state.risk, state.final_r, tick_size, digits) : 0;
         bool tp_pending = closes_all ? MathAbs(tp - final_price) > tick_size * 0.1 : tp != 0;
         string owner = "#" + IntegerToString(id);
+        bool can_edit = RR_Enable && state.version == 2 && state.blocked == 0 && state.pending == 0
+            && !RGPositionExitLatched(id) && !RMPositionExitActive(id);
         for (int i = 0; i < plan.count; i++)
         {
             double price = RRTargetPrice(state.direction, state.entry, state.risk, plan.targets[i].multiple, tick_size, digits);
@@ -178,8 +187,10 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
                 if (tp_pending) caption += " [旧TP待取消 " + DoubleToString(tp, digits) + "]";
                 else caption += " [无全平TP]";
             }
+            bool editable = can_edit && !hit;
+            RRRememberTargetLine(prefix + IntegerToString(i) + "_Line", symbol, id, false, state, plan, i, price, editable);
             RRDrawTarget(prefix + IntegerToString(i), price, caption,
-                RRTargetColor(hit, plan.targets[i].move_be != 0, false), hit, ordinal++);
+                RRTargetColor(hit, plan.targets[i].move_be != 0, false), hit, ordinal++, editable);
         }
         RRPruneTargetRows(prefix, plan.count);
     }
@@ -224,8 +235,10 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
                 caption += " [计划后保留 " + RRCompactNumber(100.0 - RRPlanTotalPercent(plan)) + "%]";
                 caption += tp_pending ? " [子单旧TP待取消]" : " [无全平TP]";
             }
+            bool editable = RR_Enable && state.version == 2 && state.blocked == 0 && state.pending == 0 && !hit;
+            RRRememberTargetLine(prefix + IntegerToString(i) + "_Line", symbol, groups[group], true, state, plan, i, price, editable);
             RRDrawTarget(prefix + IntegerToString(i), price, caption,
-                RRTargetColor(hit, plan.targets[i].move_be != 0, false), hit, ordinal++);
+                RRTargetColor(hit, plan.targets[i].move_be != 0, false), hit, ordinal++, editable);
         }
         RRPruneTargetRows(prefix, plan.count);
     }
@@ -255,5 +268,6 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
         for (int i = 0; i < owners; i++) if (StringFind(name, retained[i]) == 0) { keep = true; break; }
         if (!keep) ObjectDelete(ChartID(), name);
     }
+    RRPruneDragLines();
 }
 #endif

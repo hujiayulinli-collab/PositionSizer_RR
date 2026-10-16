@@ -106,6 +106,7 @@ void CPositionSizeCalculator::LoadRRDraft()
     ZeroMemory(m_rr_state);
     FillRRDraft(RRActivePlan);
     UpdateRRModeLabels();
+    FocusRRTargetLines();
 }
 
 void CPositionSizeCalculator::FillRRDraft(const RRPlan &plan)
@@ -117,10 +118,69 @@ void CPositionSizeCalculator::FillRRDraft(const RRPlan &plan)
     for (int i = 0; i < m_rr_count; i++)
     {
         m_rr_multiple[i] = DoubleToString(plan.targets[i].multiple, CountDecimalPlaces(plan.targets[i].multiple));
+        m_rr_original_multiple[i] = m_rr_multiple[i];
+        m_rr_source_index[i] = i;
         m_rr_percent[i] = DoubleToString(plan.targets[i].percent, CountDecimalPlaces(plan.targets[i].percent));
         m_rr_be[i] = (plan.targets[i].move_be != 0);
     }
     RenderRRPage();
+}
+
+// A dragged price can produce a non-terminating R value. Keep the original
+// double while its displayed text is untouched, including after row deletion.
+bool CPositionSizeCalculator::ReadRRDraftMultiple(const int index, const string text, double &multiple)
+{
+    int source = m_rr_source_index[index];
+    if (source >= 0 && source < m_rr_loaded_plan.count && text == m_rr_original_multiple[index])
+    {
+        multiple = m_rr_loaded_plan.targets[source].multiple;
+        return true;
+    }
+    return RRPlanParseNumber(text, multiple);
+}
+
+// Native controls use small relative priorities. Reserve a separate priority
+// band for this dialog so draggable chart targets cannot intercept its clicks.
+// Test the band before lifting, making refreshes and newly created controls safe.
+void CPositionSizeCalculator::RaiseRRPanelPriority()
+{
+    string prefix = Name();
+    if (StringLen(prefix) == 0) return;
+    const long panel_priority = 1000000;
+    int total = ObjectsTotal(m_chart_id);
+    for (int i = 0; i < total; i++)
+    {
+        string object_name = ObjectName(m_chart_id, i);
+        if (StringFind(object_name, prefix) != 0) continue;
+        long priority = ObjectGetInteger(m_chart_id, object_name, OBJPROP_ZORDER);
+        if (priority < panel_priority) ObjectSetInteger(m_chart_id, object_name, OBJPROP_ZORDER, panel_priority + priority);
+    }
+}
+
+void CPositionSizeCalculator::FocusRRTargetLines()
+{
+    RRFocusTargetLines(m_rr_group_id != 0 ? m_rr_group_id : m_rr_position_id, m_rr_group_id != 0);
+    RaiseRRPanelPriority();
+}
+
+void CPositionSizeCalculator::NotifyRRTargetMoved(const ulong id, const bool parent, const bool saved, const string message)
+{
+    if (id == 0 || (parent ? m_rr_group_id != id : m_rr_position_id != id)) return;
+    CaptureRRPage();
+    if (!saved) { SetRRStatus(message, true); return; }
+    if (m_rr_dirty)
+    {
+        m_rr_stale = true;
+        RenderRRPage();
+        SetRRStatus("图上目标已保存；当前草稿保留，请撤销后重新载入。", true);
+        return;
+    }
+    int page = m_rr_page;
+    bool loaded = parent ? LoadRRGroupDraft(id) : LoadRRPositionDraft(id);
+    if (!loaded) return;
+    m_rr_page = page;
+    RenderRRPage();
+    SetRRStatus(message);
 }
 
 bool CPositionSizeCalculator::LoadRRPositionDraft(const ulong identifier)
@@ -164,6 +224,7 @@ bool CPositionSizeCalculator::LoadRRPositionDraft(const ulong identifier)
     else if (state.version != 2) SetRRStatus("旧版持仓仅供查看，继续按原规则管理。", true);
     else if (state.blocked != 0) SetRRStatus("此仓位的自动管理已暂停，请先核对专家日志。", true);
     else SetRRStatus("已载入该持仓方案；已触发的目标不可修改。");
+    FocusRRTargetLines();
     return true;
 }
 
@@ -200,6 +261,7 @@ bool CPositionSizeCalculator::LoadRRGroupDraft(const ulong parent)
     if (!managed) SetRRStatus(error, true);
     else if (RBGroupBuilding(parent)) SetRRStatus("父组建仓中；完成或取消后可修改止盈、按比例平仓。", true);
     else SetRRStatus("已载入父组方案；比例按整组初始成交量计算。");
+    FocusRRTargetLines();
     return true;
 }
 
@@ -355,7 +417,7 @@ void CPositionSizeCalculator::RefreshRRTargetPrices()
         int index = m_rr_page * 5 + row;
         if (index >= m_rr_count) break;
         double multiple;
-        if (!RRPlanParseNumber(m_EdtRRMultiple[row].Text(), multiple) || multiple <= 0 || risk <= 0)
+        if (!ReadRRDraftMultiple(index, m_EdtRRMultiple[row].Text(), multiple) || multiple <= 0 || risk <= 0)
         {
             m_LblRRPrice[row].Text("目标价：请输入有效 R 和初始止损。");
             continue;
@@ -557,8 +619,10 @@ void CPositionSizeCalculator::OnClickBtnRRAdd()
     CaptureRRPage();
     double next_r = 1;
     double previous_r;
-    if ((m_rr_count > 0) && RRPlanParseNumber(m_rr_multiple[m_rr_count - 1], previous_r)) next_r = previous_r + 1;
+    if ((m_rr_count > 0) && ReadRRDraftMultiple(m_rr_count - 1, m_rr_multiple[m_rr_count - 1], previous_r)) next_r = previous_r + 1;
     m_rr_multiple[m_rr_count] = DoubleToString(next_r, CountDecimalPlaces(next_r));
+    m_rr_original_multiple[m_rr_count] = "";
+    m_rr_source_index[m_rr_count] = -1;
     m_rr_percent[m_rr_count] = "0";
     m_rr_be[m_rr_count] = false;
     m_rr_count++;
@@ -581,6 +645,8 @@ void CPositionSizeCalculator::OnClickBtnRRDelete(const int row)
     for (int i = index; i < m_rr_count - 1; i++)
     {
         m_rr_multiple[i] = m_rr_multiple[i + 1];
+        m_rr_original_multiple[i] = m_rr_original_multiple[i + 1];
+        m_rr_source_index[i] = m_rr_source_index[i + 1];
         m_rr_percent[i] = m_rr_percent[i + 1];
         m_rr_be[i] = m_rr_be[i + 1];
     }
@@ -657,7 +723,7 @@ void CPositionSizeCalculator::OnClickBtnRRSave()
             draft.targets[i] = m_rr_loaded_plan.targets[i];
             continue;
         }
-        if (!RRPlanParseNumber(m_rr_multiple[i], draft.targets[i].multiple) || !RRPlanParseNumber(m_rr_percent[i], draft.targets[i].percent))
+        if (!ReadRRDraftMultiple(i, m_rr_multiple[i], draft.targets[i].multiple) || !RRPlanParseNumber(m_rr_percent[i], draft.targets[i].percent))
         {
             SetRRStatus("第 " + IntegerToString(i + 1) + " 个目标请输入有效数字（小数用 .）。", true);
             return;
@@ -698,6 +764,11 @@ void CPositionSizeCalculator::OnClickBtnRRSave()
     SaveSettingsOnDisk(SymbolForTrading);
     m_rr_dirty = false;
     m_rr_loaded_plan = draft;
+    for (int i = 0; i < m_rr_count; i++)
+    {
+        m_rr_original_multiple[i] = m_rr_multiple[i];
+        m_rr_source_index[i] = i;
+    }
     RefreshRRPlanSummary();
     SetRRStatus(!RR_Enable ? "方案已保存；请开启 RR_Enable 后使用。" : (RRPlanClosesAll(draft) ? "方案已保存，仅应用于之后的新仓。" : "新仓方案已保存；保留余仓，不设置全平 TP。"));
 }

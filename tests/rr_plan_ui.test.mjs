@@ -24,12 +24,17 @@ function extract(name) {
         .replace(/\bRRState (\w+);/g, 'let $1 = {};')
         .replace(/\b(?:double|string|int|bool|ulong|uint|long)\s+(\w+)\s*;/g, 'let $1;')
         .replace(/\b(?:double|string|int|bool|ulong|uint|long)\s+(?=\w+\s*=)/g, 'let ')
+        .replace(/const let /g, 'const ')
         .replace(/\((?:int|ulong|long)\)/g, '')
         .replace(/RRReadManagedPosition\(([^;\n]+), (state|current), ticket, error\)/g, 'RRReadManagedPosition($1, $2)')
         .replace(/RBReadManagedGroup\(([^,\n]+), (state|current), symbol, remaining, server_tp, error\)/g, 'RBReadManagedGroup($1, $2, data => {symbol = data.symbol; remaining = data.remaining; server_tp = data.server_tp; error = data.error;})')
         .replace('RBRequestGroupClose(m_rr_group_id, percent, error)', 'RBRequestGroupClose(m_rr_group_id, percent, value => error = value)')
         .replace('RBApplyGroupPlan(m_rr_group_id, draft, m_rr_expected_checksum, m_rr_expected_stage, error)', 'RBApplyGroupPlan(m_rr_group_id, draft, m_rr_expected_checksum, m_rr_expected_stage, value => error = value)')
-        .replace('RRPlanParseNumber(m_EdtRRMultiple[row].Text(), multiple)', '((multiple = parseNumber(m_EdtRRMultiple[row].Text())) !== null)')
+        .replace('ReadRRDraftMultiple(index, m_EdtRRMultiple[row].Text(), multiple)', 'ReadRRDraftMultiple(index, m_EdtRRMultiple[row].Text(), value => multiple = value)')
+        .replace('ReadRRDraftMultiple(m_rr_count - 1, m_rr_multiple[m_rr_count - 1], previous_r)', 'ReadRRDraftMultiple(m_rr_count - 1, m_rr_multiple[m_rr_count - 1], value => previous_r = value)')
+        .replace('ReadRRDraftMultiple(i, m_rr_multiple[i], draft.targets[i].multiple)', 'ReadRRDraftMultiple(i, m_rr_multiple[i], value => draft.targets[i].multiple = value)')
+        .replace('multiple = m_rr_loaded_plan.targets[source].multiple;', 'multiple(m_rr_loaded_plan.targets[source].multiple);')
+        .replace('RRPlanParseNumber(text, multiple)', 'parseOutput(text, multiple)')
         .replace('RMRequestClose(m_rr_position_id, percent, sets.MagicNumber, error)', 'RMRequestClose(m_rr_position_id, percent, sets.MagicNumber, value => error = value)')
         .replace('RRPlanParseNumber(m_EdtRRClosePercent.Text(), percent)', '((percent = parseNumber(m_EdtRRClosePercent.Text())) !== null)')
         .replace('RRPlanParseNumber(percentage, summary.targets[index].percent)', 'parseInto(percentage, summary.targets[index], "percent")')
@@ -79,17 +84,25 @@ function fixture(count = 2) {
     for (let i = 0; i < count; i++) active.targets[i] = { multiple: i + 1, percent: 100 / count, move_be: i === 0 ? 1 : 0 };
     const s = {
         RRActivePlan: active, RR_MAX_TARGETS: 20, RR_Enable: true,
+        RRFocusTargetLines: () => {}, panelName: 'PS_123_', Name: () => s.panelName, m_chart_id: 77, OBJPROP_ZORDER: 'zorder',
+        chartObjects: new Map(), zorderWrites: [], StringLen: text => text.length, StringFind: (text, part) => text.indexOf(part),
+        ObjectsTotal: chart => { assert.equal(chart, 77); return s.chartObjects.size; },
+        ObjectName: (chart, index) => { assert.equal(chart, 77); return [...s.chartObjects.keys()][index]; },
+        ObjectGetInteger: (chart, name, property) => { assert.equal(chart, 77); assert.equal(property, 'zorder'); return s.chartObjects.get(name); },
+        ObjectSetInteger: (chart, name, property, priority) => { assert.equal(chart, 77); assert.equal(property, 'zorder'); s.chartObjects.set(name, priority); s.zorderWrites.push({name, priority}); return true; },
         m_rr_count: 0, m_rr_page: 0, m_rr_visible: true, m_minimized: false,
         m_rr_has_plan: true, m_rr_position_magic: 123, m_rr_position_symbol: 'AUDUSD', m_rr_position_choices: '',
         m_controls_ready: true, m_rr_position_id: 0, m_rr_group_id: 0, m_rr_last_refresh: 0, m_rr_stale: false, m_rr_readonly: false, m_rr_dirty: false,
         m_rr_expected_checksum: 0, m_rr_expected_stage: 0, m_rr_live_stage: 0, m_rr_state: {}, m_rr_loaded_plan: makePlan(),
         m_rr_multiple: Array(20).fill(''), m_rr_percent: Array(20).fill(''), m_rr_be: Array(20).fill(false),
+        m_rr_original_multiple: Array(20).fill(''), m_rr_source_index: Array(20).fill(-1),
         m_LblRRPage: new Control(), m_BtnRRPrevious: new Control(), m_BtnRRNext: new Control(), m_BtnRRAdd: new Control(),
         DoubleToString: (v, digits) => v.toFixed(digits),
         CountDecimalPlaces: value => { for (let i = 0; i < 100; i++) if (Math.abs(Math.round(value * 10 ** i) / 10 ** i - value) < 1e-8) return i; return -1; },
         IntegerToString: String, StringSubstr: (text, start, count) => (text || '').substr(start, count),
         ArrayResize: (items, n) => { items.length = n; },
         ChartRedraw: () => {}, parseNumber, makePlan, ZeroMemory: () => {}, structuredClone,
+        parseOutput: (text, output) => { const value = parseNumber(text); if (value === null) return false; output(value); return true; },
         parseInto: (text, target, field) => { const value = parseNumber(text); if (value === null) return false; target[field] = value; return true; },
         canEdit: true, applyAllowed: true, canEditCalls: 0, applyCalls: 0, updates: [],
         SymbolForTrading: 'AUDUSD', sets: { MagicNumber: 123, TPMultiplier: 2, EntryLevel: 100, StopLossLevel: 90 },
@@ -166,7 +179,7 @@ function fixture(count = 2) {
     s.RefreshValues = () => s.updates.push(['refresh']);
     s.SaveSettingsOnDisk = symbol => s.updates.push(['settings', symbol]);
     const context = vm.createContext(s);
-    for (const name of ['CreateRRControls', 'LoadRRDraft', 'FillRRDraft', 'LoadRRPositionDraft', 'LoadRRGroupDraft', 'RefreshRRGroupStatus', 'UpdateRRModeLabels', 'CaptureRRPage', 'RenderRRPage', 'OnClickBtnRRAdd', 'OnClickBtnRRDelete',
+    for (const name of ['CreateRRControls', 'LoadRRDraft', 'FillRRDraft', 'ReadRRDraftMultiple', 'NotifyRRTargetMoved', 'FocusRRTargetLines', 'RaiseRRPanelPriority', 'LoadRRPositionDraft', 'LoadRRGroupDraft', 'RefreshRRGroupStatus', 'UpdateRRModeLabels', 'CaptureRRPage', 'RenderRRPage', 'OnClickBtnRRAdd', 'OnClickBtnRRDelete',
                          'RefreshRRTargetPrices', 'RefreshRRPlanSummary', 'RefreshRRLiveStatus', 'OnClickBtnRRNewPlan', 'OnClickBtnRRPosition',
                          'OnClickBtnRRPrevious', 'OnClickBtnRRNext', 'OnClickBtnRRReset', 'OnClickBtnRRSave', 'SelectRRPanelPosition',
                          'RefreshRRPositionChoices', 'OnChangeRRPosition', 'OnClickRRManualClose', 'RefreshRRManualAction'])
@@ -663,6 +676,111 @@ check('parent chooser hides finished history but retains active unresolved and s
     assert.deepEqual(s.m_CmbRRPosition.items.map(i => i.value), [0, -101, -104]);
     assert.match(s.m_CmbRRPosition.items[1].text, /父ID 101.*已结束/); assert.equal(s.m_CmbRRPosition.Value(), -101);
     s.OnClickBtnRRNewPlan(); s.RefreshRRPositionChoices(); assert.deepEqual(s.m_CmbRRPosition.items.map(i => i.value), [0, -104]);
+});
+
+check('a saved line drag reloads the selected position and preserves its page and selected tab', () => {
+    const s = fixture(7); const plan = structuredClone(s.RRActivePlan); const p = addPosition(s, 42, { plan });
+    s.sets.SelectedTab = 4; s.selectPosition(42); s.OnClickBtnRRNext(); p.plan.targets[5].multiple = 6.5;
+    s.NotifyRRTargetMoved(42, false, true, '目标已保存');
+    assert.equal(s.m_rr_page, 1); assert.equal(s.m_EdtRRMultiple[0].Text(), '6.5');
+    assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_CmbRRPosition.Value(), 42); assert.equal(s.sets.SelectedTab, 4);
+    assert.equal(s.m_rr_dirty, false); assert.equal(s.m_rr_stale, false); assert.equal(s.status.text, '目标已保存');
+});
+check('a saved line drag reloads the matching parent group without switching to a child', () => {
+    const s = fixture(); const group = addGroup(s); s.selectPosition(-123456); group.plan.targets[0].multiple = 2.25;
+    s.NotifyRRTargetMoved(123456, true, true, '父组目标已保存');
+    assert.equal(s.m_EdtRRMultiple[0].Text(), '2.25'); assert.match(s.m_LblRRPrice[0].Text(), /104.50.*待触发/);
+    assert.equal(s.m_rr_group_id, 123456); assert.equal(s.m_rr_position_id, 0); assert.equal(s.m_CmbRRPosition.Value(), -123456);
+    assert.equal(s.m_rr_expected_checksum, s.RRPlanChecksum(group.plan));
+});
+check('a drag with an unfinished visible draft retains all text and BE flags and requires reload', () => {
+    const s = fixture(); const p = addPosition(s); s.selectPosition(42);
+    s.m_EdtRRMultiple[1].Text('7..'); s.m_EdtRRPercent[0].Text('25'); s.m_ChkRRBreakEven[1].Checked(true);
+    p.plan.targets[0].multiple = 2.5; s.NotifyRRTargetMoved(42, false, true, '已保存');
+    assert.equal(s.m_EdtRRMultiple[1].Text(), '7..'); assert.equal(s.m_EdtRRPercent[0].Text(), '25');
+    assert.equal(s.m_ChkRRBreakEven[1].Checked(), true); assert.equal(s.m_rr_dirty, true); assert.equal(s.m_rr_stale, true);
+    assert.equal(s.m_BtnRRSave.enabled, false); assert.match(s.status.text, /草稿保留.*撤销/);
+    s.OnClickBtnRRSave(); assert.equal(s.positionApplyCalls.length, 0);
+    s.OnClickBtnRRReset(); assert.equal(s.m_EdtRRMultiple[0].Text(), '2.5'); assert.equal(s.m_rr_stale, false);
+});
+check('a parent drag also preserves and locks an existing group draft', () => {
+    const s = fixture(); const group = addGroup(s); s.selectPosition(-123456); s.m_EdtRRPercent[1].Text('20');
+    group.plan.targets[0].multiple = 3; s.NotifyRRTargetMoved(123456, true, true, '已保存');
+    assert.equal(s.m_EdtRRPercent[1].Text(), '20'); assert.equal(s.m_EdtRRMultiple[0].Text(), '2');
+    assert.equal(s.m_rr_stale, true); s.OnClickBtnRRSave(); assert.equal(s.groupApplyCalls.length, 0);
+});
+check('another owner line drag never changes the active draft or confuses equal parent and position ids', () => {
+    const s = fixture(); addPosition(s, 42); addGroup(s, 42); s.selectPosition(42); s.m_EdtRRMultiple[1].Text('8..');
+    const before = structuredClone(s.status);
+    s.NotifyRRTargetMoved(42, true, true, '父组'); s.NotifyRRTargetMoved(99, false, false, '另一单失败');
+    assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_rr_dirty, false); assert.equal(s.m_rr_stale, false);
+    assert.equal(s.m_EdtRRMultiple[1].Text(), '8..'); assert.deepEqual(s.status, before);
+    s.OnClickBtnRRReset(); s.OnClickBtnRRNewPlan(); s.NotifyRRTargetMoved(0, false, true, '预览');
+    assert.equal(s.m_rr_position_id, 0); assert.equal(s.m_rr_group_id, 0);
+});
+check('a rejected drag shows the error while preserving the draft and its save state', () => {
+    const s = fixture(); addPosition(s); s.selectPosition(42); s.m_EdtRRPercent[1].Text('25');
+    s.NotifyRRTargetMoved(42, false, false, '目标不能越过其他目标');
+    assert.equal(s.m_EdtRRPercent[1].Text(), '25'); assert.equal(s.m_rr_dirty, true); assert.equal(s.m_rr_stale, false);
+    assert.equal(s.m_BtnRRSave.enabled, true); assert.deepEqual(s.status, { text: '目标不能越过其他目标', error: true });
+});
+check('price-derived R remains exact when only percentage or BE changes on a position', () => {
+    const s = fixture(); const p = addPosition(s); const exact = 8 / 3; p.plan.targets[0].multiple = exact; s.selectPosition(42);
+    assert.notEqual(Number(s.m_EdtRRMultiple[0].Text()), exact); assert.match(s.m_LblRRPrice[0].Text(), /4321.26.*待触发/);
+    s.m_EdtRRPercent[1].Text('25'); s.m_ChkRRBreakEven[0].Checked(false); s.OnClickBtnRRSave();
+    assert.equal(p.plan.targets[0].multiple, exact); assert.equal(p.plan.targets[1].percent, 25); assert.equal(p.plan.targets[0].move_be, 0);
+});
+check('price-derived R remains exact through parent plan saves and paging', () => {
+    const s = fixture(7); const group = addGroup(s, 123456, { plan: structuredClone(s.RRActivePlan) });
+    const exact = 23 / 3; group.plan.targets[6].multiple = exact; s.selectPosition(-123456); s.OnClickBtnRRNext();
+    s.m_ChkRRBreakEven[1].Checked(true); s.OnClickBtnRRPrevious(); s.OnClickBtnRRSave();
+    assert.equal(group.plan.targets[6].multiple, exact); assert.equal(group.plan.targets[6].move_be, 1);
+});
+check('deleting an earlier target keeps the surviving exact R associated with its own row', () => {
+    const s = fixture(3); const exact = 8 / 3; s.RRActivePlan.targets[2].multiple = exact; s.LoadRRDraft();
+    s.OnClickBtnRRDelete(0); s.m_EdtRRPercent[0].Text('50'); s.m_EdtRRPercent[1].Text('50'); s.OnClickBtnRRSave();
+    assert.equal(s.RRActivePlan.count, 2); assert.equal(s.RRActivePlan.targets[1].multiple, exact);
+    s.m_ChkRRBreakEven[1].Checked(true); s.OnClickBtnRRSave(); assert.equal(s.RRActivePlan.targets[1].multiple, exact);
+});
+check('explicit R edits override the cached exact value and new targets do not inherit deleted data', () => {
+    const s = fixture(); const p = addPosition(s); p.plan.targets[0].multiple = 8 / 3; s.selectPosition(42);
+    s.m_EdtRRMultiple[0].Text('2.75'); s.OnClickBtnRRDelete(1); s.OnClickBtnRRAdd(); s.m_EdtRRPercent[1].Text('50');
+    s.OnClickBtnRRSave(); assert.equal(p.plan.targets[0].multiple, 2.75); assert.equal(p.plan.targets[1].multiple, 3.75);
+});
+
+check('selection immediately focuses the selected position or parent and clears in new-plan mode without a timer', () => {
+    const s = fixture(); const calls = []; s.RRFocusTargetLines = (owner, parent) => calls.push({ owner, parent });
+    addPosition(s, 42); addGroup(s, 42); s.selectPosition(42);
+    assert.equal(s.m_CmbRRPosition.Value(), 42);
+    s.selectPosition(-42); assert.equal(s.m_CmbRRPosition.Value(), -42);
+    s.OnClickBtnRRNewPlan(); assert.equal(s.m_CmbRRPosition.Value(), 0);
+    assert.deepEqual(calls, [{ owner: 42, parent: false }, { owner: 42, parent: true }, { owner: 0, parent: false }]);
+});
+
+check('panel priorities stay above draggable lines while preserving the native control hierarchy', () => {
+    const s = fixture(); s.chartObjects = new Map([
+        ['PS_123_Back', 0], ['PS_123_Edit', 3], ['PS_123_ComboList', 41],
+        ['PSRR_Targets_42_0', 20], ['PS_999_Back', 0], ['foreign_PS_123_Button', 5],
+    ]);
+    s.FocusRRTargetLines();
+    assert.equal(s.chartObjects.get('PS_123_Back'), 1000000);
+    assert.equal(s.chartObjects.get('PS_123_Edit') - s.chartObjects.get('PS_123_Back'), 3);
+    assert.equal(s.chartObjects.get('PS_123_ComboList') - s.chartObjects.get('PS_123_Back'), 41);
+    assert.equal(s.chartObjects.get('PSRR_Targets_42_0'), 20); assert.equal(s.chartObjects.get('PS_999_Back'), 0);
+    assert.equal(s.chartObjects.get('foreign_PS_123_Button'), 5); assert.equal(s.zorderWrites.length, 3);
+});
+check('repeated panel priority refresh is stable and raises newly created controls without incrementing old ones', () => {
+    const s = fixture(); s.chartObjects.set('PS_123_Edit', 3); s.FocusRRTargetLines();
+    const first = s.chartObjects.get('PS_123_Edit'); s.FocusRRTargetLines(); s.FocusRRTargetLines();
+    assert.equal(s.chartObjects.get('PS_123_Edit'), first); assert.equal(s.zorderWrites.length, 1);
+    s.chartObjects.set('PS_123_NewEdit', 3); s.chartObjects.set('PS_123_NewButton', 0); s.FocusRRTargetLines();
+    assert.equal(s.chartObjects.get('PS_123_NewEdit'), first); assert.equal(s.chartObjects.get('PS_123_NewButton'), first - 3);
+    assert.equal(s.zorderWrites.length, 3);
+    s.chartObjects.set('PS_123_Edit', 3); s.FocusRRTargetLines(); assert.equal(s.chartObjects.get('PS_123_Edit'), first);
+});
+check('uncreated panel with an empty prefix never changes chart objects', () => {
+    const s = fixture(); s.panelName = ''; s.chartObjects.set('PSRR_Targets_42_0', 20); s.chartObjects.set('OtherPanel', 0);
+    s.FocusRRTargetLines(); assert.equal(s.zorderWrites.length, 0);
 });
 
 console.log(`RR plan UI: ${count} production-method tests passed.`);

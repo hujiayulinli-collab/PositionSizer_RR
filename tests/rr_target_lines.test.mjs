@@ -33,6 +33,10 @@ function fixture() {
         _Symbol: 'XAUUSD', _Period: 5, RRActivePlan: plan, groups: [],
         RBCollectGroups: out => { out.push(...ctx.groups.map(g=>g.id)); return out.length; },
         RBGroupBuilding: id => ctx.groups.find(g=>g.id===id)?.building || false,
+        RBIsChild: id => ctx.positions.find(p=>p.id===id)?.child || false,
+        RGPositionExitLatched: id => ctx.positions.find(p=>p.id===id)?.guard || false,
+        RMPositionExitActive: id => ctx.positions.find(p=>p.id===id)?.manual || false,
+        RRRememberTargetLine: () => {}, RRResetDragLines: () => {}, RRPruneDragLines: () => {},
         RBReadManagedGroup: (id, state, output) => { const g=ctx.groups.find(g=>g.id===id); if(!g || g.busy) return false; Object.assign(state, structuredClone(g.state)); output(g); return true; },
         SYMBOL_TRADE_TICK_SIZE: 1, SYMBOL_DIGITS: 2, POSITION_SYMBOL: 3, POSITION_MAGIC: 4,
         POSITION_IDENTIFIER: 5, POSITION_TP: 6, time: 1000, rows: [], positions: [], objects,
@@ -61,8 +65,8 @@ function fixture() {
         RRStatePlan: (state, target) => Object.assign(target, structuredClone(state.plan)),
         RRStateClosesAll: state => state.version === 1 || ctx.RRPlanClosesAll(state.plan),
         RRTargetColor: (hit, be, preview) => ({ hit, be, preview }),
-        RRDrawTarget: (key, price, caption, color, hit) => {
-            ctx.rows.push({ key, price, caption, color, hit });
+        RRDrawTarget: (key, price, caption, color, hit, ordinal, editable=false) => {
+            ctx.rows.push({ key, price, caption, color, hit, editable });
             objects.set(key + '_Line', { price }); objects.set(key + '_Label', { caption });
         },
         ObjectsTotal: () => objects.size, ObjectName: (_, index) => [...objects.keys()][index],
@@ -77,7 +81,7 @@ function fixture() {
     ctx.refresh = () => { ctx.rows = []; ctx.RRRefreshTargetLines('XAUUSD', 123, 4336.71, 4349.42, -1, true); };
     ctx.position = (id = 42) => ({
         id, ticket: id + 100, journal: true, magic: 123, symbol: 'XAUUSD', tp: 4303.34,
-        state: { version: 2, magic: 123, direction: -1, entry: 4341.74, risk: 4349.42 - 4341.74, final_r: 5, stage: 0, blocked: 0, plan: structuredClone(plan) },
+        state: { version: 2, magic: 123, direction: -1, entry: 4341.74, risk: 4349.42 - 4341.74, final_r: 5, stage: 0, blocked: 0, pending: 0, plan: structuredClone(plan) },
     });
     return ctx;
 }
@@ -251,5 +255,23 @@ check('parent runner warns while a child full TP is still pending removal', () =
     const g={id:9001,symbol:'XAUUSD',remaining:5,tp:-1,state};s.groups.push(g);s.refresh();
     assert.match(s.rows[1].caption,/子单旧TP待取消/);
     g.tp=0;s.rows=[];s.refresh();assert.match(s.rows[1].caption,/无全平TP/);
+});
+check('only untriggered managed targets expose drag handles', () => {
+    const s=fixture();const p=s.position();p.state.stage=1;s.positions.push(p);s.refresh();
+    assert.deepEqual(s.rows.map(r=>r.editable),[false,true]);
+    for(const change of [{version:1},{blocked:1},{pending:1}]) {
+        Object.assign(p.state,{version:2,blocked:0,pending:0},change);s.refresh();assert.ok(s.rows.every(r=>!r.editable));
+    }
+});
+check('preview, money-guard and manual-exit targets stay read-only', () => {
+    const s=fixture();s.refresh();assert.ok(s.rows.every(r=>!r.editable));
+    const p=s.position();s.positions.push(p);
+    for(const field of ['guard','manual']) {p[field]=true;s.refresh();assert.ok(s.rows.every(r=>!r.editable));p[field]=false;}
+    s.RR_Enable=false;s.refresh();assert.ok(s.rows.every(r=>!r.editable));
+});
+check('parent exposes one independently editable target grid and children never expose another', () => {
+    const s=fixture();const p=s.position();p.child=true;s.positions.push(p);
+    s.groups.push({id:9001,symbol:'XAUUSD',remaining:5,tp:0,state:p.state});s.refresh();
+    assert.equal(s.rows.length,2);assert.ok(s.rows.every(r=>r.editable && r.key.includes('Parent_9001')));
 });
 console.log(`${count} chart annotations checks passed`);

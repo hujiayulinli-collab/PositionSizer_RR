@@ -79,7 +79,8 @@ private:
     uint             m_rr_expected_checksum;
     RRState          m_rr_state;
     RRPlan           m_rr_loaded_plan;
-    string           m_rr_multiple[RR_MAX_TARGETS], m_rr_percent[RR_MAX_TARGETS];
+    string           m_rr_multiple[RR_MAX_TARGETS], m_rr_percent[RR_MAX_TARGETS], m_rr_original_multiple[RR_MAX_TARGETS];
+    int              m_rr_source_index[RR_MAX_TARGETS];
     bool             m_rr_be[RR_MAX_TARGETS];
     bool             m_rr_has_plan;
     long             m_rr_position_magic;
@@ -210,6 +211,8 @@ public:
             void     MoveOutsideTradeButton();
             double   DPIScale() {return m_DPIScale;}
             void     RefreshRRLiveStatus(); // Refreshes live labels without replacing the edit draft.
+            void     NotifyRRTargetMoved(const ulong id, const bool parent, const bool saved, const string message);
+            void     FocusRRTargetLines();
             void     RefreshGuardLiveStatus();
             void     RefreshTradeControlStatus();
             // Remember the panel's location to have the same location for minimized and maximized states.
@@ -242,6 +245,8 @@ private:
     void             RefreshTradingSubpage();
     void             LayoutTradingSubpage();
     void             FillRRDraft(const RRPlan &plan);
+    void             RaiseRRPanelPriority();
+    bool             ReadRRDraftMultiple(const int index, const string text, double &multiple);
     void             CaptureRRPage();
     void             RenderRRPage();
     void             RefreshRRTargetPrices();

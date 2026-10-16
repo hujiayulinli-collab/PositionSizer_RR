@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.210"
-string    Version = "3.14 - RR 1.70";
+#property version   "3.211"
+string    Version = "3.14 - RR 1.71";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -35,6 +35,7 @@ bool RMGuardExitReady(const ulong identifier, const double volume, const double 
 #include "RRDealAlerts.mqh"
 #include "RRGuard.mqh"
 #include "RRManualExecution.mqh"
+#include "RRTargetDrag.mqh"
 #include "RRTargetLines.mqh"
 #include "RRPanelRecovery.mqh"
 #include "Position Sizer.mqh";
@@ -635,7 +636,7 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] RR 1.70 面板初始化完成。请在“亏损保护”页填写金额并保存，0 金额表示关闭。");
+    Print("[PS RR] RR 1.71 面板初始化完成。持仓未触发的 TP 线可双击选中后拖动修改价格。");
     return INIT_SUCCEEDED;
 }
 
@@ -737,6 +738,26 @@ void OnChartEvent(const int id,
                   const double &dparam,
                   const string &sparam)
 {
+    if ((id == CHARTEVENT_OBJECT_DRAG || id == CHARTEVENT_OBJECT_CHANGE)
+        && StringFind(sparam, RRLinePrefix) == 0)
+    {
+        if (!RRPanelInitSucceeded || CheckPointer(ExtDialog) != POINTER_DYNAMIC) return;
+        string message;
+        ulong owner;
+        bool parent, saved;
+        if (RRHandleTargetDrag(sparam, message, owner, parent, saved))
+        {
+            if (owner != 0) ExtDialog.NotifyRRTargetMoved(owner, parent, saved, message);
+            if (message != "")
+            {
+                Print("[PS RR TP] ", message);
+                if (!saved) Alert("TP 未修改：", message);
+            }
+            RRRefreshViews(true);
+            ChartRedraw();
+            return;
+        }
+    }
     if (id == CHARTEVENT_CHART_CHANGE) RRRefreshViews(true);
     if (id == CHARTEVENT_MOUSE_MOVE)
     {
@@ -1070,6 +1091,9 @@ void OnChartEvent(const int id,
     if (id != CHARTEVENT_CHART_CHANGE)
     {
         ExtDialog.OnEvent(id, lparam, dparam, sparam);
+        // Controls can be rebuilt while switching tabs or adding TP rows.
+        // Keep their clicks ahead of chart targets before the next user event.
+        if (id != CHARTEVENT_MOUSE_MOVE) ExtDialog.FocusRRTargetLines();
         if (id >= CHARTEVENT_CUSTOM) ChartRedraw();
     }
 
@@ -1176,6 +1200,7 @@ void RRRefreshViews(const bool force = false)
     ExtDialog.RefreshGuardLiveStatus();
     RGRefreshStatus();
     ExtDialog.RefreshRRLiveStatus();
+    ExtDialog.FocusRRTargetLines();
     RRRefreshTargetLines(SymbolForTrading, sets.MagicNumber, tEntryLevel, tStopLossLevel,
         sets.TradeDirection == Long ? 1 : -1, force);
 }

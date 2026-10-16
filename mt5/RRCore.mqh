@@ -17,6 +17,30 @@ double RRTargetPrice(const int direction, const double entry, const double risk,
     return NormalizeDouble(price, digits);
 }
 
+// Preserve a dragged legal price at full R precision. RRTargetPrice remains the
+// single forward calculation used by chart lines and execution.
+bool RRTargetMultipleFromPrice(const int direction, const double entry, const double risk,
+                               const double requested, const double tick_size, const int digits,
+                               double &multiple, double &legal_price)
+{
+    if ((direction != 1 && direction != -1) || digits < 0 || digits > 8
+        || !MathIsValidNumber(entry) || entry <= 0 || !MathIsValidNumber(risk) || risk <= 0
+        || !MathIsValidNumber(requested) || requested <= 0
+        || !MathIsValidNumber(tick_size) || tick_size <= 0) return false;
+    double units = requested / tick_size;
+    if (!MathIsValidNumber(units)) return false;
+    double rounded = NormalizeDouble(MathRound(units) * tick_size, digits);
+    if (!MathIsValidNumber(rounded) || rounded <= 0 || direction * (rounded - entry) <= 0) return false;
+    double candidate = direction * (rounded - entry) / risk;
+    if (!MathIsValidNumber(candidate) || candidate <= 0) return false;
+    double verified = RRTargetPrice(direction, entry, risk, candidate, tick_size, digits);
+    // Never silently move an extra tick to conceal a precision mismatch.
+    if (!MathIsValidNumber(verified) || MathAbs(verified - rounded) > tick_size * 0.1) return false;
+    multiple = candidate;
+    legal_price = rounded;
+    return true;
+}
+
 bool RRTargetReached(const int direction, const double entry, const double risk, const double multiple,
                      const double bid, const double ask, const double tick_size, const int digits)
 {

@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.213"
-string    Version = "3.14 - RR 1.73";
+#property version   "1.800" // Public v1.8.0 in MT5's two-part version format.
+string    Version = "1.8.0";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -638,7 +638,7 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] RR 1.73 面板初始化完成。持仓下拉使用置顶鼠标事件处理；分批开仓仍支持最短100毫秒间隔。");
+    Print("[PS RR] v1.8.0 公开版面板初始化完成。分批开仓支持最短100毫秒间隔，已包含持仓下拉点击修复。");
     return INIT_SUCCEEDED;
 }
 

@@ -154,5 +154,17 @@
     "binary": "PositionSizer_RR_v1.72.ex5",
     "binarySha256": "0f3a199fcc92936a6ccaa5428f975352c1eb13c87c6fdb79579d00899fe68537",
     "originalFileCount": 84
+  },
+  {
+    "version": "1.73",
+    "tag": "v1.73",
+    "commit": "c3f2f20e23f473f20c1ac3671e217d437339bf30",
+    "fileVersion": "3.213",
+    "archive": "PositionSizer_RR_v1.73.zip",
+    "archiveSha256": "dead984913315b77436d8e9ec34db812235edac5fbbe7b64830761b64d72f2cf",
+    "originalArchiveSha256": "dead984913315b77436d8e9ec34db812235edac5fbbe7b64830761b64d72f2cf",
+    "binary": "PositionSizer_RR_v1.73.ex5",
+    "binarySha256": "c1cf46ccabc578a7b01e67f47bb9fcb71bbd5c1849b21e9aed8e116f580cd09d",
+    "originalFileCount": 85
   }
 ]

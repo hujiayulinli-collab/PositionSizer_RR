@@ -21,6 +21,16 @@ public:
 class CRRPanelComboBox : public CComboBox
 {
 public:
+    // ChartEvent's top-window path calls OnMouseEvent directly. Reuse the
+    // visibility-aware event traversal so hidden list rows cannot eat clicks.
+    virtual bool OnMouseEvent(const int x, const int y, const int flags)
+    {
+        if (!IsVisible()) return false;
+        long mouse_x = x;
+        double mouse_y = y;
+        string mouse_flags = IntegerToString(flags);
+        return CComboBox::OnEvent(CHARTEVENT_MOUSE_MOVE, mouse_x, mouse_y, mouse_flags);
+    }
     bool OpenDropDown()
     {
         if (Expanded()) return true;
@@ -143,6 +153,7 @@ public:
     virtual void     Destroy();
     virtual bool     Create(const long chart, const string name, const int subwin, const int x1, const int y1);
     virtual bool     OnEvent(const int id, const long& lparam, const double& dparam, const string& sparam);
+    virtual bool     OnMouseEvent(const int x, const int y, const int flags);
     virtual void     CalculateSettingsBasedOnLines(); // Gets values from lines.
     virtual void     RefreshValues(); // Recalculates position size.
     virtual bool     SaveSettingsOnDisk(string symbol);

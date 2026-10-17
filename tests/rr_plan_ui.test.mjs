@@ -778,6 +778,53 @@ check('repeated panel priority refresh is stable and raises newly created contro
     assert.equal(s.zorderWrites.length, 3);
     s.chartObjects.set('PS_123_Edit', 3); s.FocusRRTargetLines(); assert.equal(s.chartObjects.get('PS_123_Edit'), first);
 });
+check('expanded holding chooser puts its entire subtree above covered panel controls', () => {
+    const s = fixture(); s.chartObjects = new Map([
+        ['PS_123_m_CmbRRPositionEdit', 3], ['PS_123_m_CmbRRPositionDrop', 4],
+        ['PS_123_m_CmbRRPositionList', 0], ['PS_123_m_CmbRRPositionListItem1', 7],
+        ['PS_123_m_CmbRRPositionListScrollInc', 12], ['PS_123_m_BtnRRManualClose', 80],
+        ['PS_123_m_EdtRRClosePercent', 81], ['PS_999_m_CmbRRPositionListItem1', 7],
+        ['PSRR_Targets_42_0', 20],
+    ]);
+    s.m_CmbRRPosition.OpenDropDown(); s.FocusRRTargetLines();
+    for (const [suffix, relative] of [['Edit', 3], ['Drop', 4], ['List', 0], ['ListItem1', 7], ['ListScrollInc', 12]]) {
+        const priority = s.chartObjects.get('PS_123_m_CmbRRPosition' + suffix);
+        assert.equal(priority, 2000000 + relative);
+        assert.ok(priority > s.chartObjects.get('PS_123_m_BtnRRManualClose'));
+        assert.ok(priority > s.chartObjects.get('PS_123_m_EdtRRClosePercent'));
+    }
+    assert.equal(s.chartObjects.get('PS_999_m_CmbRRPositionListItem1'), 7);
+    assert.equal(s.chartObjects.get('PSRR_Targets_42_0'), 20);
+});
+check('closing and reopening a holding chooser restores normal priority without losing native relative order', () => {
+    const s = fixture(); s.chartObjects = new Map([
+        ['PS_123_m_CmbRRPositionEdit', 3], ['PS_123_m_CmbRRPositionListItem1', 27],
+        ['PS_123_m_BtnRRManualClose', 80],
+    ]);
+    for (let i = 0; i < 3; i++) {
+        s.m_CmbRRPosition.OpenDropDown(); s.FocusRRTargetLines();
+        assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionEdit'), 2000003);
+        assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionListItem1'), 2000027);
+        s.m_CmbRRPosition.CloseDropDown(); s.FocusRRTargetLines();
+        assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionEdit'), 1000003);
+        assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionListItem1'), 1000027);
+        assert.equal(s.chartObjects.get('PS_123_m_BtnRRManualClose'), 1000080);
+    }
+});
+check('an open chooser reasserts popup priority after native resets and includes newly created list rows', () => {
+    const s = fixture(); s.chartObjects.set('PS_123_m_CmbRRPositionListItem1', 7);
+    s.m_CmbRRPosition.OpenDropDown(); s.FocusRRTargetLines();
+    const writes = s.zorderWrites.length; s.FocusRRTargetLines();
+    assert.equal(s.zorderWrites.length, writes, 'unchanged priorities do not rewrite chart objects');
+    s.chartObjects.set('PS_123_m_CmbRRPositionListItem1', 9);
+    s.chartObjects.set('PS_123_m_CmbRRPositionListItem2', 10);
+    s.FocusRRTargetLines();
+    assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionListItem1'), 2000009);
+    assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionListItem2'), 2000010);
+    s.m_CmbRRPosition.CloseDropDown(); s.FocusRRTargetLines();
+    assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionListItem1'), 1000009);
+    assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionListItem2'), 1000010);
+});
 check('uncreated panel with an empty prefix never changes chart objects', () => {
     const s = fixture(); s.panelName = ''; s.chartObjects.set('PSRR_Targets_42_0', 20); s.chartObjects.set('OtherPanel', 0);
     s.FocusRRTargetLines(); assert.equal(s.zorderWrites.length, 0);

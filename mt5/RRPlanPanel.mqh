@@ -139,21 +139,40 @@ bool CPositionSizeCalculator::ReadRRDraftMultiple(const int index, const string 
     return RRPlanParseNumber(text, multiple);
 }
 
-// Native controls use small relative priorities. Reserve a separate priority
-// band for this dialog so draggable chart targets cannot intercept its clicks.
-// Test the band before lifting, making refreshes and newly created controls safe.
+// The standard container's raw mouse traversal also visits hidden leaf controls.
+// Preserve the existing OnEvent visibility checks for tabs and hidden TP rows;
+// ChartEvent still owns focus changes and delivers the popup before this panel.
+bool CPositionSizeCalculator::OnMouseEvent(const int x, const int y, const int flags)
+{
+    if (!IsVisible()) return false;
+    long mouse_x = x;
+    double mouse_y = y;
+    string mouse_flags = IntegerToString(flags);
+    return OnEvent(CHARTEVENT_MOUSE_MOVE, mouse_x, mouse_y, mouse_flags);
+}
+
+// Native object priority complements ChartEvent's internal mouse routing.
+// Keep the expanded combo above covered panel controls as well as TP lines.
+// Strip our own band first so opening/closing and refreshes never accumulate it.
 void CPositionSizeCalculator::RaiseRRPanelPriority()
 {
     string prefix = Name();
     if (StringLen(prefix) == 0) return;
     const long panel_priority = 1000000;
+    const long popup_priority = 2000000;
+    string combo_prefix = prefix + "m_CmbRRPosition";
+    bool expanded = m_CmbRRPosition.Expanded();
     int total = ObjectsTotal(m_chart_id);
     for (int i = 0; i < total; i++)
     {
         string object_name = ObjectName(m_chart_id, i);
         if (StringFind(object_name, prefix) != 0) continue;
         long priority = ObjectGetInteger(m_chart_id, object_name, OBJPROP_ZORDER);
-        if (priority < panel_priority) ObjectSetInteger(m_chart_id, object_name, OBJPROP_ZORDER, panel_priority + priority);
+        long relative = priority;
+        if (relative >= popup_priority) relative -= popup_priority;
+        else if (relative >= panel_priority) relative -= panel_priority;
+        long desired = (expanded && StringFind(object_name, combo_prefix) == 0 ? popup_priority : panel_priority) + relative;
+        if (priority != desired) ObjectSetInteger(m_chart_id, object_name, OBJPROP_ZORDER, desired);
     }
 }
 

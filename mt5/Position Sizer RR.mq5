@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "3.212"
-string    Version = "3.14 - RR 1.72";
+#property version   "3.213"
+string    Version = "3.14 - RR 1.73";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -638,7 +638,7 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] RR 1.72 面板初始化完成。分批开仓间隔支持毫秒设置，最短100毫秒；实际发送仍等待成交和止损确认。");
+    Print("[PS RR] RR 1.73 面板初始化完成。持仓下拉使用置顶鼠标事件处理；分批开仓仍支持最短100毫秒间隔。");
     return INIT_SUCCEEDED;
 }
 
@@ -1089,15 +1089,7 @@ void OnChartEvent(const int id,
         }
     }
 
-    // Call Panel's event handler only if it is not a CHARTEVENT_CHART_CHANGE - workaround for minimization bug on chart switch.
-    if (id != CHARTEVENT_CHART_CHANGE)
-    {
-        ExtDialog.OnEvent(id, lparam, dparam, sparam);
-        // Controls can be rebuilt while switching tabs or adding TP rows.
-        // Keep their clicks ahead of chart targets before the next user event.
-        if (id != CHARTEVENT_MOUSE_MOVE) ExtDialog.FocusRRTargetLines();
-        if (id >= CHARTEVENT_CUSTOM) ChartRedraw();
-    }
+    RRDispatchPanelEvent(id, lparam, dparam, sparam);
 
     // Recalculate on chart changes, clicks, and certain object dragging.
     if ((id == CHARTEVENT_CLICK) || (id == CHARTEVENT_CHART_CHANGE) ||
@@ -1209,6 +1201,18 @@ void OnTimer()
     if (GetTickCount64() - LastRecalculationTime < 1000) return; // Do not recalculate on timer if less than 1 second passed.
     ExtDialog.RefreshValues();
     ChartRedraw();
+}
+
+// ChartEvent owns mouse focus and ON_BRING_TO_TOP in the standard library.
+// Calling OnEvent directly bypasses popup priority and lets covered controls
+// receive a list-row click. Keep the existing chart-switch minimization guard.
+void RRDispatchPanelEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
+{
+    if (id == CHARTEVENT_CHART_CHANGE) return;
+    ExtDialog.ChartEvent(id, lparam, dparam, sparam);
+    // Opening/closing a list and creating controls arrive as custom events.
+    if (id != CHARTEVENT_MOUSE_MOVE) ExtDialog.FocusRRTargetLines();
+    if (id >= CHARTEVENT_CUSTOM) ChartRedraw();
 }
 
 void RRRefreshViews(const bool force = false)

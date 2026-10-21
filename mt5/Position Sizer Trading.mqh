@@ -6,11 +6,11 @@
 
 #include "errordescription.mqh"
 
-// The last planned partial exit is only a local EA condition. A broker TP
-// would close the entire runner before that partial-close logic can preserve it.
+// Every RR target is a local EA condition, including a final full exit.
+// Keep calculator previews intact while all RR broker entry requests use TP=0.
 double RRNewOrderTakeProfit(const double preview_tp)
 {
-    if (RR_Enable && !RRPlanClosesAll(RRActivePlan)) return 0;
+    if (RR_Enable) return 0;
     return preview_tp;
 }
 
@@ -64,9 +64,9 @@ bool RRBeforeTrade()
         Alert("RR：请将主选项页的止盈数量设为 1。多个目标请在“分仓止盈”页面添加和保存。");
         return false;
     }
-    if ((sets.MagicNumber <= 0) || (sets.DoNotApplyStopLoss) || (sets.DoNotApplyTakeProfit))
+    if ((sets.MagicNumber <= 0) || (sets.DoNotApplyStopLoss))
     {
-        Alert("RR：请使用大于 0 的专用 Magic Number，并在交易选项卡中启用止损和止盈；不要勾选不设置 SL/TP。");
+        Alert("RR：请使用大于 0 的专用 Magic Number，并启用服务器止损；不要勾选不设置 SL。分仓止盈由 EA 到价后市价执行，不挂服务器 TP。");
         return false;
     }
     if ((sets.StopLossLevel <= 0) || (sets.EntryLevel <= 0) ||
@@ -950,11 +950,12 @@ bool CheckConfirmation(const ENUM_ORDER_TYPE ot, const double PositionSize, cons
     if (sets.EntryType == StopLimit) message += TRANSLATION_LABEL_STOPPRICE + ": " + DoubleToString(sets.StopPriceLevel, _Digits) + "\n";
     message += TRANSLATION_LABEL_ENTRY + ": " + DoubleToString(sets.EntryLevel, _Digits) + "\n";
     if (!sets.DoNotApplyStopLoss) message += TRANSLATION_LABEL_STOPLOSS + ": " + DoubleToString(sets.StopLossLevel, _Digits) + "\n";
-    if (RR_Enable && !RRPlanClosesAll(RRActivePlan))
+    if (RR_Enable)
     {
         message += "分仓计划平 " + DoubleToString(RRPlanTotalPercent(RRActivePlan), 2)
             + "% / 保留 " + DoubleToString(100.0 - RRPlanTotalPercent(RRActivePlan), 2) + "%\n";
-        message += "保留余仓：不设置服务器全平 TP；BE 按勾选目标触发。\n";
+        message += "虚拟 TP：到价后由 EA 市价平仓，不设置服务器 TP；BE 按勾选目标触发。\n";
+        message += "需保持 MT5/EA 运行、联网及允许交易；实际成交价可能滑点。\n";
     }
     else if ((tp > 0) && (!sets.DoNotApplyTakeProfit))
     {

@@ -146,7 +146,7 @@ function reset(volumes = [0.01, 0.01]) {
     for (let i = 0; i < volumes.length; i++) {
         env.positions.set(i + 1, { ticket: i + 101, POSITION_TYPE: 'POSITION_TYPE_BUY', POSITION_SYMBOL: 'TEST',
             POSITION_MAGIC: 123, POSITION_VOLUME: volumes[i], POSITION_PRICE_OPEN: 100, POSITION_SL: 90,
-            POSITION_TP: 150, POSITION_PROFIT: 0, POSITION_SWAP: 0 });
+            POSITION_TP: 0, POSITION_PROFIT: 0, POSITION_SWAP: 0 });
         env.histories.set(i + 1, [{ ticket: i + 1001, DEAL_POSITION_ID: i + 1, DEAL_COMMISSION: -0.01 }]);
     }
     context.RR_Enable = true;
@@ -308,12 +308,63 @@ check('BE modifies each ticket and never loosens an existing better SL', () => {
     g.exit_state.be_requested = 1; env.positions.get(1).POSITION_SL = 105;
     context.RBUpdateGroupStops(1, g);
     assert.equal(env.stopRequests.length, 1); assert.equal(env.stopRequests[0].position, 102);
-    assert.equal(env.stopRequests[0].sl, 100); assert.equal(env.stopRequests[0].tp, 150);
+    assert.equal(env.stopRequests[0].sl, 100); assert.equal(env.stopRequests[0].tp, 0);
 });
 check('retained remainder clears every child TP but keeps SL', () => {
     const g = reset([1, 1]); env.canTrade = true; g.exit_state.target_percent = [50, 25];
+    for (const pos of env.positions.values()) pos.POSITION_TP = 150;
     context.RBUpdateGroupStops(1, g);
     assert.equal(env.stopRequests.length, 2); assert.ok(env.stopRequests.every(r => r.tp === 0 && r.sl === 90));
+});
+check('full-exit plan removes legacy child TPs without changing SL or unrelated positions', () => {
+    const g = reset([1, 1]); env.canTrade = true;
+    for (const pos of env.positions.values()) pos.POSITION_TP = 150;
+    env.positions.get(1).POSITION_SL = 105;
+    env.positions.set(99, { ticket: 999, POSITION_TP: 170, POSITION_SL: 80 });
+    context.RBUpdateGroupStops(1, g);
+    assert.deepEqual(env.stopRequests.map(r => [r.position, r.sl, r.tp]), [[101, 105, 0], [102, 90, 0]]);
+    assert.equal(env.positions.get(99).POSITION_TP, 170);
+    assert.equal(env.requests.length, 0, 'removing server TP alone never registers a close');
+});
+check('disabled RR does not remove an existing parent server TP', () => {
+    const g = reset([1]); env.canTrade = true; env.positions.get(1).POSITION_TP = 150; context.RR_Enable = false;
+    context.RBUpdateGroupStops(1, g);
+    assert.equal(env.stopRequests.length, 0); assert.equal(env.saves.length, 0);
+});
+check('legacy TP removal retries after rejection and never reinstalls a server target', () => {
+    const g = reset([1]); env.canTrade = true; env.stopReject = true; env.positions.get(1).POSITION_TP = 150;
+    context.RBUpdateGroupStops(1, g); env.time += 1; context.RBUpdateGroupStops(1, g);
+    assert.equal(env.stopRequests.length, 1);
+    env.time += 3; env.stopReject = false; context.RBUpdateGroupStops(1, g);
+    assert.equal(env.stopRequests.length, 2); assert.ok(env.stopRequests.every(r => r.tp === 0 && r.sl === 90));
+    env.positions.get(1).POSITION_TP = 0; env.time += 3; context.RBUpdateGroupStops(1, g);
+    assert.equal(env.stopRequests.length, 2); assert.equal(env.requests.length, 0);
+});
+check('buy final virtual TP waits for bid then closes every remaining child serially across reload', () => {
+    let g = reset([3, 3, 3, 3]); env.canTrade = true;
+    g.exit_state.stage = 1; g.exit_state.be_requested = 1; g.exit_state.be_done = 1;
+    env.positions.delete(1); env.positions.delete(2);
+    for (const pos of env.positions.values()) pos.POSITION_SL = 100;
+    env.tick = { bid: 149.99, ask: 150 }; context.RBManageGroupLocked(1, g);
+    assert.equal(env.requests.length, 0, 'ask touching buy TP is not executable');
+    env.tick = { bid: 150, ask: 150.01 }; context.RBManageGroupLocked(1, g);
+    assert.equal(g.exit_state.stage, 2); assert.equal(env.saved.exit_state.stage, 2);
+    assert.deepEqual(env.requests.map(r => [r.id, r.percent]), [[3, 100]]);
+    context.RBManageGroupLocked(1, g); assert.equal(env.requests.length, 1, 'pending close does not duplicate');
+    g = clone(env.saved); finishRequest(); context.RBManageGroupLocked(1, g);
+    assert.deepEqual(env.requests.map(r => [r.id, r.percent]), [[3, 100], [4, 100]]);
+    finishRequest(); context.RBManageGroupLocked(1, g);
+    assert.equal(env.positions.size, 0); assert.equal(env.requests.length, 2); assert.equal(env.stopRequests.length, 0);
+});
+check('sell final virtual TP waits for ask and requests the remaining child market close', () => {
+    const g = reset([3, 3]); g.direction = -1; g.exit_state.direction = -1;
+    g.exit_state.stage = 1; env.positions.delete(1);
+    Object.assign(env.positions.get(2), { POSITION_TYPE: 'POSITION_TYPE_SELL', POSITION_SL: 100 });
+    env.tick = { bid: 49.99, ask: 50.01 }; context.RBManageGroupLocked(1, g);
+    assert.equal(env.requests.length, 0, 'bid touching sell TP is not executable');
+    env.tick = { bid: 49.99, ask: 50 }; context.RBManageGroupLocked(1, g);
+    assert.equal(g.exit_state.stage, 2); assert.equal(env.requests[0].percent, 100); assert.equal(env.requests[0].direction, -1);
+    finishRequest(); context.RBManageGroupLocked(1, g); assert.equal(env.positions.size, 0); assert.equal(env.requests.length, 1);
 });
 check('failed BE is retried without sending another reduction', () => {
     const g = reset([1]); env.canTrade = true; env.stopReject = true; env.tick = { bid: 125, ask: 125.01 };
@@ -397,7 +448,7 @@ check('a stop journal failure prevents this cycle from dispatching a reduction',
 });
 check('sell targets use ask and BE preserves a better lower sell stop', () => {
     const g = reset([1, 1]); g.direction = -1; g.exit_state.direction = -1; g.exit_state.final_r = 5;
-    for (const pos of env.positions.values()) Object.assign(pos, { POSITION_TYPE: 'POSITION_TYPE_SELL', POSITION_SL: 110, POSITION_TP: 50 });
+    for (const pos of env.positions.values()) Object.assign(pos, { POSITION_TYPE: 'POSITION_TYPE_SELL', POSITION_SL: 110 });
     env.positions.get(1).POSITION_SL = 95; env.canTrade = true;
     env.tick = { bid: 79.99, ask: 80.01 }; context.RBManageGroupLocked(1, g); assert.equal(g.exit_state.stage, 0);
     env.tick = { bid: 79.99, ask: 80 }; context.RBManageGroupLocked(1, g);

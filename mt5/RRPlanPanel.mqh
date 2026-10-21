@@ -320,15 +320,12 @@ void CPositionSizeCalculator::RefreshRRGroupStatus()
     else
     {
         int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-        double tick = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
         string tp;
-        if (server_tp < 0) tp = "各子单TP待同步";
-        else if (RRStateClosesAll(current) && plan.count > 0)
-        {
-            double final_price = RRTargetPrice(current.direction, current.entry, current.risk, plan.targets[plan.count - 1].multiple, tick, digits);
-            tp = (MathAbs(server_tp - final_price) < tick * 0.5 ? "TP已同步 " : "TP待同步 ") + DoubleToString(server_tp, digits);
-        }
-        else tp = server_tp == 0 ? "全平TP已取消" : "旧TP待取消 " + DoubleToString(server_tp, digits);
+        bool paused = !RR_Enable || current.blocked != 0;
+        if (server_tp == 0) tp = paused ? "EA止盈暂停" : "EA到价市价平仓";
+        else if (paused) tp = "服务器TP仍在，管理暂停";
+        else if (server_tp < 0) tp = "子单旧TP待取消";
+        else tp = "旧TP待取消 " + DoubleToString(server_tp, digits);
         m_LblRRPositionInfo.Text("整组余仓 " + DoubleToString(remaining, CountDecimalPlaces(remaining)) + " 手 · " + tp);
     }
     RefreshRRTargetPrices();
@@ -502,7 +499,7 @@ void CPositionSizeCalculator::RefreshRRPlanSummary()
     m_LblRRInfo.Text(label);
     m_LblRRInfo.Color(clrDarkSlateGray);
     if ((m_rr_position_id == 0 && m_rr_group_id == 0))
-        m_LblRRPositionInfo.Text(retained > 0 ? "保留部分不设全平 TP；可手动处理或再加目标。" : "所有目标合计平仓 100%，最后目标为全平 TP。");
+        m_LblRRPositionInfo.Text(retained > 0 ? "EA到价市价减仓；未安排的余仓继续保留。" : "全部TP由EA市价执行；需联网并允许交易。");
 }
 
 void CPositionSizeCalculator::RefreshRRLiveStatus()
@@ -573,14 +570,10 @@ void CPositionSizeCalculator::RefreshRRLiveStatus()
     int digits = (int)SymbolInfoInteger(m_rr_position_symbol, SYMBOL_DIGITS);
     double volume = PositionGetDouble(POSITION_VOLUME);
     double actual_tp = PositionGetDouble(POSITION_TP);
-    double tick = SymbolInfoDouble(m_rr_position_symbol, SYMBOL_TRADE_TICK_SIZE);
     string tp_status;
-    if (RRStateClosesAll(current))
-    {
-        double final_price = RRTargetPrice(current.direction, current.entry, current.risk, plan.targets[plan.count - 1].multiple, tick, digits);
-        tp_status = (MathAbs(actual_tp - final_price) < tick * 0.5 ? "TP已同步 " : "TP待同步 ") + DoubleToString(actual_tp, digits);
-    }
-    else tp_status = actual_tp == 0 ? "全平TP已取消" : "旧TP待取消 " + DoubleToString(actual_tp, digits);
+    bool paused = !RR_Enable || current.blocked != 0;
+    if (actual_tp == 0) tp_status = paused ? "EA止盈暂停" : "EA到价市价平仓";
+    else tp_status = (paused ? "服务器TP仍在 " : "旧TP待取消 ") + DoubleToString(actual_tp, digits);
     m_LblRRPositionInfo.Text("余仓 " + DoubleToString(volume, CountDecimalPlaces(volume)) + " 手 · " + tp_status);
     RefreshRRTargetPrices();
 }
@@ -756,7 +749,7 @@ void CPositionSizeCalculator::OnClickBtnRRSave()
         {
             SetRRStatus(error, true); return;
         }
-        if (LoadRRGroupDraft(m_rr_group_id)) SetRRStatus("父组方案已保存；整组子单按共同目标管理。");
+        if (LoadRRGroupDraft(m_rr_group_id)) SetRRStatus("父组方案已保存；整组按共同目标市价止盈。");
         return;
     }
     if (m_rr_position_id != 0)
@@ -766,7 +759,7 @@ void CPositionSizeCalculator::OnClickBtnRRSave()
             SetRRStatus(error, true);
             return;
         }
-        if (LoadRRPositionDraft(m_rr_position_id)) SetRRStatus(RRPlanClosesAll(draft) ? "持仓方案已保存；最终 TP 待服务器同步。" : "方案已保存；将取消全平 TP，未安排比例继续保留。");
+        if (LoadRRPositionDraft(m_rr_position_id)) SetRRStatus(RRPlanClosesAll(draft) ? "持仓方案已保存；所有TP到价后市价平仓。" : "方案已保存；到价市价减仓，未安排比例继续保留。");
         return;
     }
     if (!RRPlanCanEdit("", sets.MagicNumber, error) || !RRPlanApply(draft, error))

@@ -167,7 +167,7 @@ test('legacy group seconds and new group milliseconds have separate interpretati
 test('entry submits intent first then one request with immediate SL and parent child comment', () => {
     const g = group(); assert.equal(context.RBSendNext(1,g,error()),true);
     assert.deepEqual(env.events.map(e=>e[0]),['check','save','send','save']);
-    const request = env.events.find(e=>e[0]==='send')[1]; assert.equal(request.sl,99); assert.equal(request.volume,5); assert.equal(request.comment,'RB7B-01'); assert.equal(g.pending,1);
+    const request = env.events.find(e=>e[0]==='send')[1]; assert.equal(request.sl,99); assert.equal(request.tp,0); assert.equal(request.volume,5); assert.equal(request.comment,'RB7B-01'); assert.equal(g.pending,1);
 });
 test('unresolved prior request can never be resubmitted', () => { const g=group({pending:1,pending_volume:5}); assert.equal(context.RBSendNext(1,g,error()),false); assert.equal(env.events.length,0); });
 test('failed durable intent results in zero sends', () => { env.saveOK=false; assert.equal(context.RBSendNext(1,group(),error()),false); assert.equal(env.events.some(e=>e[0]==='send'),false); });

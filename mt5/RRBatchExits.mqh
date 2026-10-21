@@ -336,7 +336,7 @@ bool RBRequestGroupClose(const ulong parent, const double percent, string &error
 
 bool RBUpdateGroupStops(const int handle, RBGroup &g)
 {
-    if (!RRCanTrade() || (long)TimeLocal() - g.exit_state.last_stop_request < 3) return true;
+    if (!RR_Enable || !RRCanTrade() || (long)TimeLocal() - g.exit_state.last_stop_request < 3) return true;
     string symbol = RBGroupSymbol(g);
     double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
     double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
@@ -347,8 +347,6 @@ bool RBUpdateGroupStops(const int handle, RBGroup &g)
     double current = g.direction == 1 ? tick.bid : tick.ask;
     double distance = (double)MathMax(SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL),
         SymbolInfoInteger(symbol, SYMBOL_TRADE_FREEZE_LEVEL)) * point + tick_size;
-    double desired_tp = RRStateClosesAll(g.exit_state) ? RRTargetPrice(g.direction, g.exit_state.entry,
-        g.exit_state.risk, g.exit_state.final_r, tick_size, digits) : 0;
     double be = RRBETarget(g.direction, g.exit_state.entry, g.exit_state.offset_points, point, tick_size, digits);
     bool saved_stamp = false;
     bool all_be = g.exit_state.be_requested != 0;
@@ -360,9 +358,10 @@ bool RBUpdateGroupStops(const int handle, RBGroup &g)
         if (RGPositionExitLatched(g.child_id[i])) { all_be = false; continue; }
         double old_sl = PositionGetDouble(POSITION_SL);
         double old_tp = PositionGetDouble(POSITION_TP);
-        double sl = old_sl, tp = old_tp;
-        if (desired_tp == 0) tp = 0;
-        else if (g.direction * (desired_tp - current) >= distance) tp = desired_tp;
+        // Parent targets, including the final full exit, are executed by the
+        // durable market-close scheduler. Remove an older server TP but retain
+        // the current SL unless the requested BE is strictly more protective.
+        double sl = old_sl, tp = 0;
         if (g.exit_state.be_requested != 0 && !RRSLProtectsBE(g.direction, old_sl, be, tick_size))
         {
             all_be = false;

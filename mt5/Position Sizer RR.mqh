@@ -20,7 +20,8 @@ input(name="平仓允许偏差（points）") uint RR_DeviationPoints = 20;
 // management. Intent is flushed BEFORE sending any close. A torn journal or an
 // ambiguous broker reply fails closed rather than guessing and closing twice.
 // Exact version-1 disk layout: never append to or reorder this structure.
-// Existing positions continue using their original plan and execution semantics.
+// Existing positions retain their frozen plan and execution stage; the current
+// virtual-TP policy does not change these persisted fields or their layout.
 struct RRLegacyState
 {
     uint version;
@@ -531,16 +532,12 @@ void RRUpdateStops(const int handle, RRState &s, const ulong ticket, const strin
     double old_sl = PositionGetDouble(POSITION_SL);
     double old_tp = PositionGetDouble(POSITION_TP);
     double sl = old_sl;
-    double tp = old_tp;
-    bool closes_all = RRStateClosesAll(s);
-    double desired_tp = closes_all ? RRTargetPrice(s.direction, s.entry, s.risk, s.final_r, tick_size, digits) : 0;
+    // Every RR target is virtual, including a final 100% exit. Preserve the
+    // server SL, but remove a TP inherited from an earlier version or edit.
+    // Failed removal is retried through this idempotent protection path.
+    double tp = 0;
     double distance = (double)MathMax(SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL), SymbolInfoInteger(symbol, SYMBOL_TRADE_FREEZE_LEVEL)) * point + tick_size;
-    // A retained remainder must not keep a server TP that would close it all.
-    // Clearing TP is retried by the same idempotent SL/TP synchronization path.
-    if (!closes_all) tp = 0;
-    else if (MathAbs(old_tp - desired_tp) > tick_size * 0.1 && s.direction * (desired_tp - current_price) >= distance)
-        tp = desired_tp;
-    if ((s.version == 1 && s.stage >= 2 && s.move_be != 0) || (s.version == 2 && s.be_requested != 0))
+    if ((s.version == 1 && s.stage == 2 && s.move_be != 0) || (s.version == 2 && s.be_requested != 0))
     {
         double be = RRBETarget(s.direction, s.entry, s.offset_points, point, tick_size, digits);
         if (RRSLProtectsBE(s.direction, old_sl, be, tick_size)) s.be_done = 1;
@@ -653,6 +650,13 @@ void RRProcess(const int handle, RRState &s, const ulong ticket, const string sy
         PrintFormat("[PS RR] 仓位 %I64u 检测到加仓/反转/开仓价变化，已暂停该仓位管理。", s.identifier);
         return;
     }
+    // Legacy journals also remove inherited server TP before any pending-close
+    // or target branch can return. SL/TP updates do not reduce volume; legacy
+    // BE still requires the confirmed first-reduction stage (2); final stage 3
+    // only clears TP and retains its existing SL, including any previous BE.
+    RRUpdateStops(handle, s, ticket, symbol);
+    if (!PositionSelectByTicket(ticket)) return;
+    volume = PositionGetDouble(POSITION_VOLUME);
     if (!RRResolvePending(handle, s, volume, step)) return;
     if (!PositionSelectByTicket(ticket)) return;
     volume = PositionGetDouble(POSITION_VOLUME);
@@ -889,7 +893,7 @@ bool RRApplyPositionPlanLocked(const int handle, RRState &s, const ulong ticket,
     { error = "保存失败，无法确认新方案已持久化；请检查专家日志后再操作。"; return false; }
     s = updated;
     PrintFormat("[PS RR] 仓位 %I64u 已保存新方案，已触发 %d/%d；%s。", s.identifier, s.stage, s.target_count,
-        RRStateClosesAll(s) ? "全平 TP 将由管理流程同步" : "保留余仓，服务器全平 TP 将由管理流程清除");
+        RRStateClosesAll(s) ? "全部 TP 由 EA 到价市价平仓，旧服务器 TP 将清除" : "保留余仓，全部 TP 由 EA 到价市价平仓，旧服务器 TP 将清除");
     error = "";
     return true;
 }

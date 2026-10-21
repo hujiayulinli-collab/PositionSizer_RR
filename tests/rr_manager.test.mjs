@@ -180,12 +180,12 @@ function check(name, callback) {
 
 check('below 2R updates stops without reducing', () => {
     const s = state(); const result = run(s);
-    assert.equal(s.stage, 0); assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 1);
+    assert.equal(s.stage, 0); assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 2);
 });
 check('2R intent is saved before requesting half close', () => {
     const s = state(); const result = run(s, { bid: 120, ask: 120.2 });
     assert.equal(s.stage, 1); assert.equal(result.saved[0].stage, 1);
-    assert.equal(result.closes[0].volume, 0.5); assert.equal(result.stops.length, 0);
+    assert.equal(result.closes[0].volume, 0.5); assert.equal(result.stops.length, 1);
 });
 check('first partial fill is topped up only to the initial half', () => {
     const result = run(state({ stage: 1 }), { volume: 0.7 });
@@ -193,7 +193,7 @@ check('first partial fill is topped up only to the initial half', () => {
 });
 check('confirmed half moves to BE stage and does not close twice', () => {
     const s = state({ stage: 1 }); const result = run(s, { volume: 0.5 });
-    assert.equal(s.stage, 2); assert.equal(result.closes.length, 0); assert.equal(result.stops[0].stage, 2);
+    assert.equal(s.stage, 2); assert.equal(result.closes.length, 0); assert.equal(result.stops.at(-1).stage, 2);
 });
 check('reload after completed partial keeps fixed risk and no second close', () => {
     const s = state({ stage: 1 }); const first = run(s, { volume: 0.5 });
@@ -222,7 +222,7 @@ check('sell Ask crossing 2R triggers first reduction', () => {
 check('unsplittable minimum lot stays before BE', () => {
     const s = state({ initial_volume: 0.01 });
     const result = run(s, { volume: 0.01, inVolume: 0.01, bid: 120, ask: 120.2 });
-    assert.equal(s.stage, 1); assert.equal(result.closes.length, 0); assert.equal(result.stops[0].stage, 1);
+    assert.equal(s.stage, 1); assert.equal(result.closes.length, 0); assert.equal(result.stops.at(-1).stage, 1);
 });
 check('unsplittable minimum lot can still exit at final target', () => {
     const result = run(state({ stage: 1, initial_volume: 0.01 }),
@@ -231,7 +231,7 @@ check('unsplittable minimum lot can still exit at final target', () => {
 });
 check('persistence failure before first trigger prevents close', () => {
     const result = run(state(), { bid: 120, ask: 120.2, saveFails: true });
-    assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 0);
+    assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 1);
 });
 check('persistence failure before final trigger prevents close', () => {
     const result = run(state(), { bid: 150, ask: 150.2, saveFails: true });
@@ -239,23 +239,23 @@ check('persistence failure before final trigger prevents close', () => {
 });
 check('unknown pending result prevents both repeated close and BE', () => {
     const result = run(state({ stage: 1, pending: 1, before_volume: 1 }), { volume: 0.5 });
-    assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 0);
+    assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 1);
 });
 check('active close order is not counted as completed', () => {
     const result = run(state({ stage: 1, pending: 1, pending_order: 200, before_volume: 1 }),
         { volume: 0.5, orders: [filledOrder({ active: true })] });
-    assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 0);
+    assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 1);
 });
 check('filled order still waits for position volume confirmation', () => {
     const s = state({ stage: 1, pending: 1, pending_order: 200, before_volume: 1 });
     const result = run(s, { volume: 1, orders: [filledOrder()] });
-    assert.equal(s.pending, 1); assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 0);
+    assert.equal(s.pending, 1); assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 1);
 });
 check('filled order plus reduced volume clears pending and sets BE stage', () => {
     const s = state({ stage: 1, pending: 1, pending_order: 200, before_volume: 1 });
     const result = run(s, { volume: 0.5, orders: [filledOrder()] });
     assert.equal(s.pending, 0); assert.equal(s.stage, 2); assert.equal(result.closes.length, 0);
-    assert.equal(result.stops[0].stage, 2);
+    assert.equal(result.stops.at(-1).stage, 2);
 });
 check('missing result order ticket recovers exact comment and magic', () => {
     const s = state({ stage: 1, pending: 1, before_volume: 1 });
@@ -265,7 +265,7 @@ check('missing result order ticket recovers exact comment and magic', () => {
 check('different magic cannot clear an ambiguous pending intent', () => {
     const s = state({ stage: 1, pending: 1, before_volume: 1 });
     const result = run(s, { volume: 0.5, orders: [filledOrder({ magic: 999 })] });
-    assert.equal(s.pending, 1); assert.equal(result.stops.length, 0);
+    assert.equal(s.pending, 1); assert.equal(result.stops.length, 1);
 });
 check('cancelled IOC order accounts for filled portion then tops up', () => {
     const s = state({ stage: 1, pending: 1, pending_order: 200, before_volume: 1 });
@@ -289,27 +289,27 @@ check('already blocked state never modifies or closes', () => {
     assert.equal(result.saveAttempts, 0); assert.equal(result.closes.length, 0); assert.equal(result.stops.length, 0);
 });
 
-check('stage zero installs fixed final TP while preserving initial SL', () => {
+check('stage zero clears inherited server TP while preserving initial SL', () => {
     const result = runStops(state());
-    assert.equal(result.sent[0].sl, 90); assert.equal(result.sent[0].tp, 150);
+    assert.equal(result.sent[0].sl, 90); assert.equal(result.sent[0].tp, 0);
     assert.equal(result.sent[0].position, 456);
 });
 check('stage one cannot apply BE before reduction confirmed', () => {
     const result = runStops(state({ stage: 1 }));
     assert.equal(result.sent[0].sl, 90);
 });
-check('stage two applies buy BE and final TP', () => {
+check('stage two applies buy BE with no server TP', () => {
     const result = runStops(state({ stage: 2 }), { volume: 0.5 });
-    assert.equal(result.sent[0].sl, 100); assert.equal(result.sent[0].tp, 150);
+    assert.equal(result.sent[0].sl, 100); assert.equal(result.sent[0].tp, 0);
 });
-check('stage two applies sell BE and final TP', () => {
+check('stage two applies sell BE with no server TP', () => {
     const result = runStops(state({ stage: 2, direction: -1 }),
         { direction: -1, sl: 110, tp: 60, bid: 79.8, ask: 80 });
-    assert.equal(result.sent[0].sl, 100); assert.equal(result.sent[0].tp, 50);
+    assert.equal(result.sent[0].sl, 100); assert.equal(result.sent[0].tp, 0);
 });
 check('existing more profitable stop is not weakened', () => {
     const result = runStops(state({ stage: 2 }), { sl: 105 });
-    assert.equal(result.sent[0].sl, 105); assert.equal(result.sent[0].tp, 150);
+    assert.equal(result.sent[0].sl, 105); assert.equal(result.sent[0].tp, 0);
 });
 check('BE offset uses points and rounds outward to tick', () => {
     const result = runStops(state({ stage: 2, offset_points: 5 }), { tickSize: 0.25 });
@@ -317,14 +317,14 @@ check('BE offset uses points and rounds outward to tick', () => {
 });
 check('freeze restriction defers BE without altering initial SL', () => {
     const result = runStops(state({ stage: 2 }), { freezeLevel: 2000 });
-    assert.equal(result.sent[0].sl, 90); assert.equal(result.sent[0].tp, 150);
+    assert.equal(result.sent[0].sl, 90); assert.equal(result.sent[0].tp, 0);
 });
 check('stop modification save failure sends no request', () => {
     const result = runStops(state({ stage: 2 }), { saveFails: true });
     assert.equal(result.sent.length, 0);
 });
 check('already correct SL and TP create neither request nor journal write', () => {
-    const result = runStops(state({ stage: 2 }), { sl: 100, tp: 150 });
+    const result = runStops(state({ stage: 2 }), { sl: 100, tp: 0 });
     assert.equal(result.sent.length, 0); assert.equal(result.saveAttempts, 0);
 });
 check('failed BE retry is throttled and never submits a close', () => {
@@ -597,9 +597,9 @@ check('edited future plan executes new target and retains initial-volume basis',
     const result = run(s, { bid: 140, ask: 140.2, volume: 0.5 });
     assert.equal(s.stage, 2); assert.equal(result.closes[0].volume, 0.2); assert.equal(s.risk, 10);
 });
-check('edited final TP synchronizes through existing stop flow and preserves SL', () => {
+check('edited final target stays virtual and clears old server TP without weakening SL', () => {
     const result = runStops(multiState({ final_r: 6, stage: 1, be_requested: 1 }), { sl: 102, tp: 150 });
-    assert.equal(result.sent[0].tp, 160); assert.equal(result.sent[0].sl, 102);
+    assert.equal(result.sent[0].tp, 0); assert.equal(result.sent[0].sl, 102);
 });
 
 function runner(overrides = {}) {
@@ -681,7 +681,7 @@ check('runner TP clear waits for trading permission and persistent intent', () =
 });
 check('legacy remains a full-exit plan regardless of absent v2 percentage arrays', () => {
     assert.equal(context.RRStateClosesAll(state()), true);
-    const result = runStops(state(), { tp: 0 }); assert.equal(result.sent[0].tp, 150);
+    const result = runStops(state(), { tp: 0 }); assert.equal(result.sent.length, 0);
 });
 check('previously valid near-100 v2 plan still closes the exact remainder', () => {
     const s = runner({ target_percent: [30, 69.99999995] });
@@ -784,7 +784,7 @@ check('global manager uses each actual symbol for frozen risk, close price, lot 
     assert.equal(gold.entry, 2000); assert.equal(gold.risk, 10); assert.equal(eur.entry, 1.1);
     assert.ok(Math.abs(eur.risk - 0.01) < 1e-10);
     assert.deepEqual(f.b.sends.filter(r => r.action === 'TRADE_ACTION_SLTP').map(r => [r.symbol, r.sl, r.tp]).sort(),
-        [['EURUSD', 1.1, 1.05], ['XAUUSD', 2000, 2050]]);
+        [['EURUSD', 1.1, 0], ['XAUUSD', 2000, 0]]);
     assert.equal(f.b.journals.has(f.c.RRFileName(3)), false); assert.equal(f.b.handles.size, 0);
 });
 check('nonempty selector retains symbol filtering in the global-capable manager', () => {
@@ -890,6 +890,135 @@ check('zero entry Magic cannot enroll a new manual position even when the panel 
 check('ordinary manager never captures or exits a child owned by a parent group', () => {
     const f=multiSymbolFixture();f.add(1);f.b.batchChildren=new Set([1]);f.c.RRManage('',123);
     assert.equal(f.b.journals.size,0);assert.equal(f.b.sends.length,0);
+});
+
+check('full-exit RR manager clears an inherited server TP before targets without changing the server SL', () => {
+    const f = multiSymbolFixture(); f.add(1, 'XAUUSD', { tp: 2050 });
+    f.symbols.XAUUSD.bid = 2010; f.symbols.XAUUSD.ask = 2010.1;
+    f.c.RRManage('', 123);
+    assert.equal(f.deals().length, 0);
+    assert.deepEqual(f.b.sends.map(r => [r.action, r.position, r.sl, r.tp]), [['TRADE_ACTION_SLTP', 101, 1990, 0]]);
+    assert.equal(f.b.journals.get(f.c.RRFileName(1)).stage, 0);
+    assert.equal(f.b.journals.get(f.c.RRFileName(1)).final_r, 5);
+});
+check('virtual final buy TP sends one market sell for all remaining volume at executable Bid', () => {
+    const f = multiSymbolFixture(); const p = f.add(1, 'XAUUSD', { initial: 1 });
+    const frozen = {}; assert.equal(f.c.RRCapture(p.ticket, frozen), true);
+    frozen.stage = 1; frozen.be_requested = 1; p.volume = 0.5;
+    f.b.journals.set(f.c.RRFileName(1), frozen);
+    f.symbols.XAUUSD.bid = 2050; f.symbols.XAUUSD.ask = 2050.2;
+    f.c.RRManage('', 123);
+    assert.deepEqual(f.deals().map(r => [r.type, r.volume, r.price]), [['ORDER_TYPE_SELL', 0.5, 2050]]);
+    assert.ok(f.b.sends.filter(r => r.action === 'TRADE_ACTION_SLTP').every(r => r.tp === 0));
+    const saved = f.b.journals.get(f.c.RRFileName(1)); assert.equal(saved.stage, 2); assert.equal(saved.pending, 1);
+    f.b.tick += 300; f.b.now += 100; f.c.RRManage('', 123);
+    assert.equal(f.deals().length, 1, 'unconfirmed virtual final close cannot be sent again');
+});
+check('virtual final sell TP waits for executable Ask then market-buys the exact remainder', () => {
+    const f = multiSymbolFixture(); const p = f.add(2, 'EURUSD', { initial: 0.03, tp: 0 });
+    const frozen = {}; assert.equal(f.c.RRCapture(p.ticket, frozen), true);
+    frozen.stage = 1; frozen.be_requested = 1; p.volume = 0.02; f.b.journals.set(f.c.RRFileName(2), frozen);
+    f.symbols.EURUSD.bid = 1.04999; f.symbols.EURUSD.ask = 1.05001;
+    f.c.RRManage('', 123); assert.equal(f.deals().length, 0, 'Bid alone cannot hit a sell target');
+    f.symbols.EURUSD.ask = 1.05; f.b.tick += 300; f.b.now += 4; f.c.RRManage('', 123);
+    assert.deepEqual(f.deals().map(r => [r.type, r.volume, r.price]), [['ORDER_TYPE_BUY', 0.02, 1.05]]);
+    assert.ok(f.b.sends.filter(r => r.action === 'TRADE_ACTION_SLTP').every(r => r.tp === 0));
+});
+check('latched virtual final TP resumes after restart and retracement without needing a server TP', () => {
+    const f = multiSymbolFixture(); const p = f.add(1, 'XAUUSD', { initial: 1, tp: 0 });
+    const frozen = {}; assert.equal(f.c.RRCapture(p.ticket, frozen), true);
+    frozen.stage = frozen.target_count; frozen.be_requested = 1; p.volume = 0.3;
+    f.b.journals.set(f.c.RRFileName(1), structuredClone(frozen)); f.c.RRSnapshotExisting();
+    f.symbols.XAUUSD.bid = 2030; f.symbols.XAUUSD.ask = 2030.1;
+    f.c.RRManage('', 123);
+    assert.deepEqual(f.deals().map(r => [r.type, r.volume, r.price]), [['ORDER_TYPE_SELL', 0.3, 2030]]);
+    assert.equal(f.b.journals.get(f.c.RRFileName(1)).stage, frozen.target_count);
+});
+check('full-exit TP removal retries rejection without loosening a better SL or installing another TP', () => {
+    const s = multiState({ be_requested: 1 });
+    const first = runStops(s, { tp: 150, sl: 102, sendSuccess: false, retcode: 'TRADE_RETCODE_REJECT', now: 100 });
+    assert.deepEqual([first.sent[0].sl, first.sent[0].tp], [102, 0]);
+    assert.equal(runStops(s, { tp: 150, sl: 102, now: 101 }).sent.length, 0);
+    const retry = runStops(s, { tp: 150, sl: 102, now: 104 });
+    assert.deepEqual([retry.sent[0].sl, retry.sent[0].tp], [102, 0]);
+    assert.equal(runStops(s, { tp: 0, sl: 102, now: 108 }).sent.length, 0);
+});
+check('disabled RR manager leaves the original server TP and trading behavior untouched', () => {
+    const f = multiSymbolFixture(); f.add(1, 'XAUUSD', { tp: 2050 }); f.c.RR_Enable = false;
+    f.symbols.XAUUSD.bid = 2060; f.c.RRManage('', 123);
+    assert.equal(f.b.sends.length, 0); assert.equal(f.b.journals.size, 0);
+});
+check('virtual final hit waits for trade permission then resumes its durable market exit', () => {
+    const f = multiSymbolFixture(); f.add(1, 'XAUUSD', { initial: 1, tp: 2050 });
+    f.symbols.XAUUSD.bid = 2050; f.symbols.XAUUSD.ask = 2050.1; f.c.RRCanTrade = () => false;
+    f.c.RRManage('', 123); assert.equal(f.b.sends.length, 0);
+    assert.equal(f.b.journals.get(f.c.RRFileName(1)).stage, 2);
+    f.c.RRCanTrade = () => true; f.b.tick += 300; f.b.now += 4;
+    f.symbols.XAUUSD.bid = 2030; f.symbols.XAUUSD.ask = 2030.1; f.c.RRManage('', 123);
+    assert.deepEqual(f.deals().map(r => [r.type, r.volume, r.price]), [['ORDER_TYPE_SELL', 1, 2030]]);
+    assert.ok(f.b.sends.filter(r => r.action === 'TRADE_ACTION_SLTP').every(r => r.tp === 0));
+});
+check('virtual-TP migration does not clear stops on unmanaged or blocked positions', () => {
+    const f = multiSymbolFixture(); f.add(1, 'XAUUSD', { tp: 2050 }); f.c.RRSnapshotExisting();
+    f.add(2, 'EURUSD', { magic: 999, tp: 1.05 });
+    const blocked = f.add(3, 'XAUUSD', { tp: 2050 }); const frozen = {};
+    assert.equal(f.c.RRCapture(blocked.ticket, frozen), true); frozen.blocked = 1;
+    f.b.journals.set(f.c.RRFileName(3), frozen); f.c.RRManage('', 123);
+    assert.equal(f.b.sends.length, 0);
+    assert.equal(f.b.journals.has(f.c.RRFileName(1)), false);
+    assert.equal(f.b.journals.has(f.c.RRFileName(2)), false);
+});
+check('legacy pending close still clears inherited TP without another market order or premature BE', () => {
+    const f = multiSymbolFixture(); const p = f.add(1, 'XAUUSD', { initial: 1, tp: 2050 });
+    const frozen = {}; assert.equal(f.c.RRCapture(p.ticket, frozen), true);
+    Object.assign(frozen, { version: 1, stage: 1, pending: 1, before_volume: 1, pending_order: 99999 });
+    p.volume = 0.5; f.b.journals.set(f.c.RRFileName(1), frozen);
+    f.c.RRManage('', 123);
+    assert.equal(f.deals().length, 0);
+    assert.deepEqual(f.b.sends.map(r => [r.action, r.sl, r.tp]), [['TRADE_ACTION_SLTP', 1990, 0]]);
+    const saved = f.b.journals.get(f.c.RRFileName(1));
+    assert.equal(saved.pending, 1); assert.equal(saved.stage, 1); assert.equal(saved.be_done, 0);
+});
+check('legacy first target clears inherited TP before sending its half close and retains initial SL', () => {
+    const f = multiSymbolFixture(); const p = f.add(1, 'XAUUSD', { initial: 1, tp: 2050 });
+    const frozen = {}; assert.equal(f.c.RRCapture(p.ticket, frozen), true);
+    frozen.version = 1; f.b.journals.set(f.c.RRFileName(1), frozen);
+    f.c.RRManage('', 123);
+    assert.deepEqual(f.b.sends.map(r => r.action), ['TRADE_ACTION_SLTP', 'TRADE_ACTION_DEAL']);
+    assert.deepEqual([f.b.sends[0].sl, f.b.sends[0].tp], [1990, 0]);
+    assert.deepEqual(f.deals().map(r => [r.type, r.volume]), [['ORDER_TYPE_SELL', 0.5]]);
+    assert.equal(f.b.journals.get(f.c.RRFileName(1)).stage, 1);
+});
+check('legacy direct final hit clears inherited TP before the all-remaining market close', () => {
+    const f = multiSymbolFixture(); const p = f.add(1, 'XAUUSD', { initial: 1, tp: 2050 });
+    const frozen = {}; assert.equal(f.c.RRCapture(p.ticket, frozen), true);
+    frozen.version = 1; f.b.journals.set(f.c.RRFileName(1), frozen);
+    f.symbols.XAUUSD.bid = 2050; f.symbols.XAUUSD.ask = 2050.2; f.c.RRManage('', 123);
+    assert.deepEqual(f.b.sends.map(r => r.action), ['TRADE_ACTION_SLTP', 'TRADE_ACTION_DEAL']);
+    assert.deepEqual([f.b.sends[0].sl, f.b.sends[0].tp], [1990, 0]);
+    assert.deepEqual(f.deals().map(r => [r.type, r.volume, r.price]), [['ORDER_TYPE_SELL', 1, 2050]]);
+    assert.equal(f.b.journals.get(f.c.RRFileName(1)).stage, 3);
+});
+check('legacy direct-final stage awaiting a close clears TP without inventing an untriggered first-stage BE', () => {
+    const f = multiSymbolFixture(); const p = f.add(1, 'XAUUSD', { initial: 1, tp: 2050 });
+    const frozen = {}; assert.equal(f.c.RRCapture(p.ticket, frozen), true);
+    Object.assign(frozen, { version: 1, stage: 3, pending: 1, before_volume: 1, pending_order: 99999 });
+    f.b.journals.set(f.c.RRFileName(1), frozen);
+    f.symbols.XAUUSD.bid = 2050; f.symbols.XAUUSD.ask = 2050.2; f.c.RRManage('', 123);
+    assert.equal(f.deals().length, 0);
+    assert.deepEqual(f.b.sends.map(r => [r.action, r.sl, r.tp]), [['TRADE_ACTION_SLTP', 1990, 0]]);
+    assert.equal(f.b.journals.get(f.c.RRFileName(1)).be_done, 0);
+    p.sl = 2000; f.b.tick += 300; f.b.now += 4; f.c.RRManage('', 123);
+    assert.deepEqual([f.b.sends.at(-1).sl, f.b.sends.at(-1).tp], [2000, 0], 'an already protective SL remains in place');
+});
+check('legacy protection modification reselects the position before any subsequent close', () => {
+    const f = multiSymbolFixture(); const p = f.add(1, 'XAUUSD', { initial: 1, tp: 2050 });
+    const frozen = {}; assert.equal(f.c.RRCapture(p.ticket, frozen), true);
+    frozen.version = 1; f.b.journals.set(f.c.RRFileName(1), frozen);
+    const send = f.c.OrderSend;
+    f.c.OrderSend = (request, result) => { const ok = send(request, result); f.b.positions = []; return ok; };
+    f.c.RRManage('', 123);
+    assert.equal(f.b.sends.length, 1); assert.equal(f.b.sends[0].tp, 0); assert.equal(f.deals().length, 0);
 });
 
 process.stdout.write(`\n${passed} manager tests passed against production management, capture, execution and reinitialization functions.\n`);

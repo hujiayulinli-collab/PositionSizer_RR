@@ -300,7 +300,7 @@ check('new-plan previews use calculator entry, while live targets use frozen act
     s.selectPosition(42);
     assert.equal(s.m_rr_position_id, 42); assert.equal(s.m_BtnRRSave.Text(), '应用到该持仓');
     assert.match(s.m_LblRRPrice[0].Text(), /4326.38/); assert.match(s.m_LblRRPrice[1].Text(), /4303.34/);
-    assert.match(s.m_LblRRBEInfo.Text(), /4341.74.*7.68/); assert.match(s.m_LblRRPositionInfo.Text(), /0.32.*TP已同步/);
+    assert.match(s.m_LblRRBEInfo.Text(), /4341.74.*7.68/); assert.match(s.m_LblRRPositionInfo.Text(), /0.32.*旧TP待取消/);
 });
 check('draft target prices update without moving applied position targets', () => {
     const s = fixture(); const p = addPosition(s); s.selectPosition(42);
@@ -338,12 +338,12 @@ check('triggered rows cannot change or be deleted and retain full numeric precis
     assert.equal(p.plan.targets[0].percent, 50); assert.equal(p.plan.targets[0].move_be, 1);
     assert.equal(p.plan.targets[1].multiple, 6);
 });
-check('apply saves only the selected position and reports server TP awaiting synchronization', () => {
+check('apply saves only the selected position and reports virtual execution with old TP pending removal', () => {
     const s = fixture(); const p = addPosition(s); const p2 = addPosition(s, 99); const newPlan = JSON.stringify(s.RRActivePlan);
     s.selectPosition(42); s.m_EdtRRMultiple[1].Text('6'); s.OnClickBtnRRSave();
     assert.equal(p.plan.targets[1].multiple, 6); assert.equal(p2.plan.targets[1].multiple, 5);
     assert.equal(JSON.stringify(s.RRActivePlan), newPlan); assert.equal(s.applyCalls, 0); assert.equal(s.updates.length, 0);
-    assert.match(s.status.text, /最终 TP 待服务器同步/); assert.match(s.m_LblRRPositionInfo.Text(), /TP待同步/);
+    assert.match(s.status.text, /所有TP到价后市价平仓/); assert.match(s.m_LblRRPositionInfo.Text(), /旧TP待取消/);
     assert.equal(s.m_rr_dirty, false);
 });
 check('race between last refresh and apply passes frozen checksum/stage for engine rejection', () => {
@@ -407,7 +407,7 @@ check('fine volume steps remain visible in both original and remaining quantitie
 check('runner percentage preview updates directly from typing and distinguishes saved allocation', () => {
     const s = fixture(); s.m_EdtRRPercent[1].Text('25'); s.RefreshRRTargetPrices();
     assert.match(s.m_LblRRInfo.Text(), /草稿 75% \/ 保留 25%.*已用 100%/);
-    assert.match(s.m_LblRRPositionInfo.Text(), /保留部分不设全平 TP/);
+    assert.match(s.m_LblRRPositionInfo.Text(), /EA到价市价减仓.*余仓继续保留/);
     assert.equal(s.m_rr_percent[1], '50'); assert.equal(s.RRActivePlan.targets[1].percent, 50);
 });
 check('saved runner new-plan feedback retains unallocated volume and does not invent BE', () => {
@@ -421,14 +421,14 @@ check('live runner reports pending cancellation until the actual server TP is ex
     assert.match(s.m_LblRRInfo.Text(), /已安排 75% \/ 保留 25%/);
     assert.match(s.m_LblRRPositionInfo.Text(), /旧TP待取消 4303.34/);
     p.tp = 0.00001; s.tick += 600; s.RefreshRRLiveStatus(); assert.match(s.m_LblRRPositionInfo.Text(), /旧TP待取消/);
-    p.tp = 0; s.tick += 600; s.RefreshRRLiveStatus(); assert.match(s.m_LblRRPositionInfo.Text(), /全平TP已取消/);
+    p.tp = 0; s.tick += 600; s.RefreshRRLiveStatus(); assert.match(s.m_LblRRPositionInfo.Text(), /EA到价市价平仓/);
 });
 check('changing a full-close live plan to a runner preserves the selected BE flags', () => {
     const s = fixture(); const p = addPosition(s); s.selectPosition(42);
     s.m_EdtRRPercent[1].Text('25'); s.m_ChkRRBreakEven[1].Checked(true); s.OnClickBtnRRSave();
     assert.equal(p.plan.targets[0].percent, 50); assert.equal(p.plan.targets[1].percent, 25);
     assert.equal(p.plan.targets[0].move_be, 1); assert.equal(p.plan.targets[1].move_be, 1);
-    assert.match(s.status.text, /将取消全平 TP/); assert.match(s.m_LblRRPositionInfo.Text(), /旧TP待取消/);
+    assert.match(s.status.text, /到价市价减仓/); assert.match(s.m_LblRRPositionInfo.Text(), /旧TP待取消/);
 });
 check('all runner targets may already be triggered while adding a new future target remains available', () => {
     const s = fixture(); const p = addPosition(s, 42, { stage: 2, volume: 0.08, tp: 0 }); p.plan.targets[1].percent = 25;
@@ -437,7 +437,7 @@ check('all runner targets may already be triggered while adding a new future tar
     s.OnClickBtnRRAdd(); assert.equal(s.m_EdtRRMultiple[2].readonly, false); s.m_EdtRRPercent[2].Text('25');
     s.OnClickBtnRRSave(); assert.equal(p.plan.count, 3); assert.equal(p.plan.targets[2].multiple, 6);
     assert.equal(p.plan.targets[2].percent, 25); assert.equal(p.plan.targets[0].percent, 50); assert.equal(p.plan.targets[1].percent, 25);
-    assert.match(s.status.text, /最终 TP 待服务器同步/);
+    assert.match(s.status.text, /所有TP到价后市价平仓/);
 });
 check('a zero-close BE-only plan displays all original volume retained without changing BE selection', () => {
     const s = fixture(1); s.m_EdtRRPercent[0].Text('0'); s.m_ChkRRBreakEven[0].Checked(true); s.OnClickBtnRRSave();
@@ -663,9 +663,9 @@ check('new-plan button deliberately exits parent selection without changing the 
     const s = fixture(); addGroup(s); s.selectPosition(-123456); s.OnClickBtnRRNewPlan();
     assert.equal(s.m_rr_group_id, 0); assert.equal(s.m_CmbRRPosition.Value(), 0); assert.equal(s.groupApplyCalls.length, 0);
 });
-check('inconsistent child TPs display a pending group sync without a misleading negative price', () => {
+check('inconsistent child TPs display pending removal without a misleading negative price', () => {
     const s = fixture(); addGroup(s, 123456, { tp: -1 }); s.selectPosition(-123456); s.tick += 600; s.RefreshRRLiveStatus();
-    assert.match(s.m_LblRRPositionInfo.Text(), /各子单TP待同步/);
+    assert.match(s.m_LblRRPositionInfo.Text(), /子单旧TP待取消/);
 });
 
 check('parent chooser hides finished history but retains active unresolved and selected ended groups', () => {
@@ -830,4 +830,18 @@ check('uncreated panel with an empty prefix never changes chart objects', () => 
     s.FocusRRTargetLines(); assert.equal(s.zorderWrites.length, 0);
 });
 
+check('full-exit single and parent plans with zero TP show EA execution rather than missing protection', () => {
+    const s = fixture(); addPosition(s, 42, {tp:0}); addGroup(s, 123456, {tp:0});
+    s.selectPosition(42); assert.match(s.m_LblRRPositionInfo.Text(), /EA到价市价平仓/);
+    assert.doesNotMatch(s.m_LblRRPositionInfo.Text(), /待同步|待取消/);
+    s.selectPosition(-123456); s.tick += 600; s.RefreshRRLiveStatus();
+    assert.match(s.m_LblRRPositionInfo.Text(), /EA到价市价平仓/);
+});
+check('paused virtual manager distinguishes existing server TP from no server TP', () => {
+    const s = fixture(), p = addPosition(s); s.RR_Enable = false; s.selectPosition(42);
+    assert.match(s.m_LblRRPositionInfo.Text(), /服务器TP仍在/);
+    assert.doesNotMatch(s.m_LblRRPositionInfo.Text(), /待取消/);
+    p.tp = 0; s.tick += 600; s.RefreshRRLiveStatus();
+    assert.match(s.m_LblRRPositionInfo.Text(), /EA止盈暂停/);
+});
 console.log(`RR plan UI: ${count} production-method tests passed.`);

@@ -24,8 +24,8 @@ string RRTargetCaption(const string owner, const int index, const double multipl
         + "R | " + DoubleToString(price, digits) + " | 平 " + RRCompactNumber(percent) + "%";
     if (be) text += " + BE";
     if (triggered) text += " [已触发]";
-    else if (final_target && tp_pending) text += " [最终TP待同步]";
-    else if (final_target && owner != "新仓预览") text += " [服务器TP]";
+    else text += final_target ? " [EA市价全平]" : " [EA监控]";
+    if (final_target && tp_pending) text += paused ? " [服务器TP仍在]" : " [旧TP待取消]";
     if (paused) text += " [管理暂停]";
     return text;
 }
@@ -93,7 +93,7 @@ void RRDrawTarget(const string key, const double price, const string caption,
     ObjectSetInteger(chart, line, OBJPROP_ZORDER, RRTargetLinePriority(line));
     ObjectSetString(chart, line, OBJPROP_TEXT, caption);
     ObjectSetString(chart, line, OBJPROP_TOOLTIP, caption + (editable
-        ? "\n双击选中后拖动，松开即保存。与 MT5 止盈线重合时，单击上方标签的 [改价]，输入价格或图上选价后保存。比例与 BE 不变。"
+        ? "\nEA到价后市价执行，需终端联网并允许交易。双击选中后拖动，松开即保存；也可单击 [改价] 输入价格或图上选价。比例与 BE 不变。"
         : "\n此目标仅供查看（新仓预览、已触发目标或管理暂停时不可拖动）。"));
 
     string label = key + "_Label";
@@ -174,8 +174,7 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
         if (!PositionSelectByTicket(ticket) || PositionGetString(POSITION_SYMBOL) != symbol) continue;
         double tp = PositionGetDouble(POSITION_TP);
         bool closes_all = RRStateClosesAll(state);
-        double final_price = closes_all ? RRTargetPrice(state.direction, state.entry, state.risk, state.final_r, tick_size, digits) : 0;
-        bool tp_pending = closes_all ? MathAbs(tp - final_price) > tick_size * 0.1 : tp != 0;
+        bool tp_pending = tp != 0;
         string owner = "#" + IntegerToString(id);
         bool can_edit = RR_Enable && state.version == 2 && state.blocked == 0 && state.pending == 0
             && !RGPositionExitLatched(id) && !RMPositionExitActive(id);
@@ -188,8 +187,8 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
             if (!closes_all && i == plan.count - 1)
             {
                 caption += " [计划后保留 " + RRCompactNumber(100.0 - RRPlanTotalPercent(plan)) + "%]";
-                if (tp_pending) caption += " [旧TP待取消 " + DoubleToString(tp, digits) + "]";
-                else caption += " [无全平TP]";
+                if (tp_pending) caption += (state.blocked != 0 || !RR_Enable ? " [服务器TP仍在 " : " [旧TP待取消 ") + DoubleToString(tp, digits) + "]";
+                else caption += " [无服务器TP]";
             }
             bool editable = can_edit && !hit;
             RRRememberTargetLine(prefix + IntegerToString(i) + "_Line", symbol, id, false, state, plan, i, price, editable);
@@ -225,8 +224,7 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
         if (RBGroupBuilding(groups[group]) || state.entry <= 0 || state.risk <= 0) continue;
         RRPlan plan; RRStatePlan(state, plan);
         bool closes_all = RRStateClosesAll(state);
-        double final_price = closes_all ? RRTargetPrice(state.direction, state.entry, state.risk, state.final_r, tick_size, digits) : 0;
-        bool tp_pending = closes_all ? MathAbs(server_tp - final_price) > tick_size * 0.1 : server_tp != 0;
+        bool tp_pending = server_tp != 0;
         string owner = "父组 #" + IntegerToString(groups[group]);
         for (int i = 0; i < plan.count; i++)
         {
@@ -237,7 +235,7 @@ void RRRefreshTargetLines(const string symbol, const long magic, const double pr
             if (!closes_all && i == plan.count - 1)
             {
                 caption += " [计划后保留 " + RRCompactNumber(100.0 - RRPlanTotalPercent(plan)) + "%]";
-                caption += tp_pending ? " [子单旧TP待取消]" : " [无全平TP]";
+                caption += tp_pending ? (state.blocked != 0 || !RR_Enable ? " [服务器TP仍在]" : " [子单旧TP待取消]") : " [无服务器TP]";
             }
             bool editable = RR_Enable && state.version == 2 && state.blocked == 0 && state.pending == 0 && !hit;
             RRRememberTargetLine(prefix + IntegerToString(i) + "_Line", symbol, groups[group], true, state, plan, i, price, editable);

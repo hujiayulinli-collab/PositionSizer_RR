@@ -1,15 +1,16 @@
 # 公开版本与历史记录
 
-当前公开版本为 [v1.8.1](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/tag/v1.8.1)。本仓库同时保留14个早期版本及v1.8.0，共16份版本快照；早期编号不用于推断新的公开版本先后顺序，请以“下载最新版”为准。
+当前公开版本为 [v1.8.2](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/tag/v1.8.2)。本仓库同时保留14个早期版本及v1.8.0、v1.8.1，共17份版本快照；早期编号不用于推断新的公开版本先后顺序，请以“下载最新版”为准。
 
 ## 当前公开版
 
 | 公开版本 | MT5 文件版本 | 内容 |
 |---|---|---|
+| [v1.8.2](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/tag/v1.8.2) | 1.802 | 全部分仓 TP 改为 EA 本地监控、到价市价平仓，普通持仓和父组均不挂服务器 TP；清除已接管旧仓 TP，保留 SL/BE。 |
 | [v1.8.1](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/tag/v1.8.1) | 1.801 | 修复父组平仓全平首个子单后停住；新增独立 TP 改价窗口和图上选价，避开与原生止盈横线的双击冲突。 |
 | [v1.8.0](https://github.com/hujiayulinli-collab/PositionSizer_RR/releases/tag/v1.8.0) | 1.800 | 合并内部1.72的最低100毫秒分批开仓与内部1.73的持仓下拉修复，统一面板和下载文件版本，保留此前全部功能。 |
 
-当前面板显示1.8.1；MT5属性的1.801是同一公开版本的两段数字格式。旧内部编译版本3.212/3.213与上游3.14均不是新的公开版本号。
+当前面板显示1.8.2；MT5属性的1.802是同一公开版本的两段数字格式。旧内部编译版本3.212/3.213与上游3.14均不是新的公开版本号。
 
 ## 历史版本
 

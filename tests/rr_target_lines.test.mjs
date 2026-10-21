@@ -91,7 +91,7 @@ check('managed target uses frozen fill rather than current calculator entry', ()
     const s = fixture(); s.positions.push(s.position()); s.refresh();
     assert.deepEqual(s.rows.map(r => r.price), [4326.38, 4303.34]);
     assert.match(s.rows[0].caption, /#42.*TP1 2R.*4326.38.*50% \+ BE/);
-    assert.match(s.rows[1].caption, /服务器TP/);
+    assert.match(s.rows[1].caption, /EA市价全平.*旧TP待取消/);
 });
 check('all matching managed positions have separate names', () => {
     const s = fixture(); s.positions.push(s.position(42), s.position(43)); s.refresh();
@@ -102,9 +102,9 @@ check('triggered target stays at original level with triggered status', () => {
     assert.equal(s.rows[0].hit, true); assert.equal(s.rows[1].hit, false);
     assert.match(s.rows[0].caption, /已触发/);
 });
-check('pending final TP synchronization is never labeled server TP', () => {
+check('old final server TP remains pending removal while target is EA market exit', () => {
     const s = fixture(); const p = s.position(); p.tp = 4300; s.positions.push(p); s.refresh();
-    assert.match(s.rows[1].caption, /最终TP待同步/); assert.doesNotMatch(s.rows[1].caption, /服务器TP/);
+    assert.match(s.rows[1].caption, /EA市价全平.*旧TP待取消/); assert.doesNotMatch(s.rows[1].caption, /待同步/);
 });
 check('disabled manager still displays existing plans as paused', () => {
     const s = fixture(); s.RR_Enable = false; s.positions.push(s.position()); s.refresh();
@@ -165,14 +165,14 @@ check('chart module contains no trade or journal write actions', () => {
 check('runner final partial target never claims a full server TP', () => {
     const s = fixture(); const p = s.position(); p.state.plan.targets[1].percent = 25; p.tp = 0;
     s.positions.push(p); s.refresh();
-    assert.match(s.rows[1].caption, /平 25%.*计划后保留 25%.*无全平TP/);
-    assert.doesNotMatch(s.rows[1].caption, /服务器TP|最终TP待同步/);
+    assert.match(s.rows[1].caption, /平 25%.*计划后保留 25%.*无服务器TP/);
+    assert.doesNotMatch(s.rows[1].caption, /EA市价全平|待同步/);
 });
 check('old full TP is explicitly pending cancellation on a saved runner', () => {
     const s = fixture(); const p = s.position(); p.state.plan.targets[1].percent = 25;
     s.positions.push(p); s.refresh();
     assert.match(s.rows[1].caption, /旧TP待取消 4303.34/);
-    assert.doesNotMatch(s.rows[1].caption, /无全平TP/);
+    assert.doesNotMatch(s.rows[1].caption, /无服务器TP/);
 });
 check('runner retains completed target marks after all targets have triggered', () => {
     const s = fixture(); const p = s.position(); p.state.plan.targets[1].percent = 25; p.state.stage = 2; p.tp = 0;
@@ -186,7 +186,7 @@ check('new runner preview clearly shows retained share', () => {
 check('BE-only runner labels show no invented forced close', () => {
     const s = fixture(); const p = s.position(); p.state.plan = { count: 1, targets: [{ multiple: 2, percent: 0, move_be: 1 }] }; p.tp = 0;
     s.positions.push(p); s.refresh();
-    assert.match(s.rows[0].caption, /平 0% \+ BE.*保留 100%.*无全平TP/);
+    assert.match(s.rows[0].caption, /平 0% \+ BE.*保留 100%.*无服务器TP/);
 });
 check('global manager wildcard never puts all-symbol prices on a single chart', () => {
     const s = fixture(); s.positions.push(s.position()); s.refresh();
@@ -240,7 +240,7 @@ check('parent lines disappear after all children close', () => {
 check('inconsistent child server TPs remain marked pending and cross-symbol parents stay off chart', () => {
     const s=fixture();s.groups.push({id:9001,symbol:'XAUUSD',remaining:5,tp:-1,state:s.position().state});
     s.groups.push({id:9002,symbol:'EURUSD',remaining:5,tp:0,state:s.position().state});s.refresh();
-    assert.equal(s.rows.length,2);assert.match(s.rows[1].caption,/待同步/);assert.doesNotMatch(s.rows[1].caption,/服务器TP/);
+    assert.equal(s.rows.length,2);assert.match(s.rows[1].caption,/旧TP待取消/);assert.doesNotMatch(s.rows[1].caption,/待同步/);
 });
 check('busy parent keeps its existing lines until a confirmed closed snapshot prunes them', () => {
     const s=fixture();const g={id:9001,symbol:'XAUUSD',remaining:5,tp:0,state:s.position().state};
@@ -254,7 +254,7 @@ check('parent runner warns while a child full TP is still pending removal', () =
     const s=fixture();const state=s.position().state;state.plan.targets[1].percent=25;
     const g={id:9001,symbol:'XAUUSD',remaining:5,tp:-1,state};s.groups.push(g);s.refresh();
     assert.match(s.rows[1].caption,/子单旧TP待取消/);
-    g.tp=0;s.rows=[];s.refresh();assert.match(s.rows[1].caption,/无全平TP/);
+    g.tp=0;s.rows=[];s.refresh();assert.match(s.rows[1].caption,/无服务器TP/);
 });
 check('only untriggered managed targets expose drag handles', () => {
     const s=fixture();const p=s.position();p.state.stage=1;s.positions.push(p);s.refresh();
@@ -273,5 +273,20 @@ check('parent exposes one independently editable target grid and children never 
     const s=fixture();const p=s.position();p.child=true;s.positions.push(p);
     s.groups.push({id:9001,symbol:'XAUUSD',remaining:5,tp:0,state:p.state});s.refresh();
     assert.equal(s.rows.length,2);assert.ok(s.rows.every(r=>r.editable && r.key.includes('Parent_9001')));
+});
+check('full-exit position and parent with TP zero show local targets without a server-sync warning', () => {
+    const s = fixture(), p = s.position(); p.tp = 0; s.positions.push(p);
+    s.groups.push({id:9001,symbol:'XAUUSD',remaining:12,tp:0,state:p.state}); s.refresh();
+    assert.equal(s.rows.length, 4);
+    for (const row of s.rows.filter(r => r.caption.includes('TP2'))) {
+        assert.match(row.caption, /EA市价全平/);
+        assert.doesNotMatch(row.caption, /待同步|待取消|服务器TP/);
+    }
+    assert.deepEqual(s.rows.map(r => r.price), [4326.38,4303.34,4326.38,4303.34]);
+});
+check('paused manager reports surviving old server TP without promising cancellation', () => {
+    const s = fixture(); s.positions.push(s.position()); s.RR_Enable = false; s.refresh();
+    assert.match(s.rows[1].caption, /服务器TP仍在.*管理暂停/);
+    assert.doesNotMatch(s.rows[1].caption, /待取消/);
 });
 console.log(`${count} chart annotations checks passed`);

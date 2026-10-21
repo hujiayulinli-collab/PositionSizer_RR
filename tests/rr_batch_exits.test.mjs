@@ -105,6 +105,7 @@ const context = vm.createContext({ ...Object.fromEntries(constants.map(x => [x, 
     PositionGetDouble: key => env.selected?.[key] ?? 0,
     PositionGetInteger: key => env.selected?.[key] ?? 0,
     RMPositionExitActive: id => env.busy.has(id),
+    RMExitSettled: () => false, // Pending journals require real history; exercised in rr_manual_execution.
     RRHistory: (id, order, volume, mixed) => {
         order.value = id + 2000; volume.value = env.initialVolumes[id - 1]; mixed.value = env.mixed;
         return !env.historyUnavailable;

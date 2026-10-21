@@ -6,6 +6,7 @@ import vm from 'node:vm';
 
 const source = readFileSync(new URL('../mt5/RRManualExecution.mqh', import.meta.url), 'utf8');
 const guard = readFileSync(new URL('../mt5/RRGuardExecution.mqh', import.meta.url), 'utf8');
+const batch = readFileSync(new URL('../mt5/RRBatchExits.mqh', import.meta.url), 'utf8');
 const ordinary = readFileSync(new URL('../mt5/Position Sizer RR.mqh', import.meta.url), 'utf8');
 const fields = [.../struct RMExecutionState\s*\{([\s\S]*?)\};/.exec(source)[1]
     .matchAll(/\b(uint|int|ulong|long|double)\s+(\w+)\s*;/g)].map(([, type, name]) => ({ type, name }));
@@ -15,10 +16,10 @@ const clone = value => structuredClone(value);
 const zeroState = () => Object.fromEntries(fields.map(field => [field.name, 0]));
 
 function extract(name, text = source) {
-    const match = new RegExp(`(?:bool|void|string|uint|ulong)\\s+${name}\\s*\\(([^)]*)\\)\\s*\\{`).exec(text);
+    const match = new RegExp(`(?:bool|void|string|uint|ulong|double|int)\\s+${name}\\s*\\(([^)]*)\\)\\s*\\{`).exec(text);
     assert.ok(match, `Missing actual function ${name}`);
     const args = match[1].split(',').filter(arg => arg.trim()).map(arg => {
-        const parsed = arg.trim().match(/(\w+)\s*(?:=\s*(.*))?$/);
+        const parsed = arg.trim().match(/(\w+)(?:\[\])?\s*(?:=\s*(.*))?$/);
         return parsed[1] + (parsed[2] === undefined ? '' : ` = ${parsed[2]}`);
     });
     let depth = 1, start = match.index + match[0].length, end = start;
@@ -27,6 +28,8 @@ function extract(name, text = source) {
         if (text[end] === '}') depth--;
     }
     let body = text.slice(start, end - 1)
+        .replace(/double remaining, server_tp, volumes\[RB_MAX_CHILDREN\];/g,
+            'let remaining = 0, server_tp = 0, volumes = Array(64).fill(0);')
         .replace(/\b(?:RMExecutionState|RRState|MqlTick)\s+(\w+)\s*;/g, 'let $1 = {};')
         .replace(/\bMqlTrade(?:Request|Result|CheckResult)\s+(\w+)\s*=\s*\{\}/g, 'let $1 = {}')
         .replace(/\b(?:const\s+)?(?:int|long|uint|ulong|double|bool|string)\s+(?=[A-Za-z_]\w*\s*(?:=|;))/g, 'let ')
@@ -57,6 +60,16 @@ function extract(name, text = source) {
             .replace('手；等待执行确认。", target)', '手；等待执行确认。", target.value)');
     }
     if (name === 'RMManage' || name === 'RMExitSettled') body = body.replace('let status;', 'let status = { value: "" };');
+    if (name === 'RBPickClose') body = body.replace(/\blots\b/g, 'lots.value');
+    if (name === 'RBManageGroupLocked') {
+        body = body.replace('let error;', 'let error = { value: "" };')
+            .replaceAll('RBGroupVolumes(g, remaining, server_tp, volumes, error)',
+                'RBGroupVolumes(g, {get value() {return remaining;}, set value(v) {remaining = v;}}, '
+                + '{get value() {return server_tp;}, set value(v) {server_tp = v;}}, volumes, error)')
+            .replace('RBPickClose(volumes, g.child_count, wanted, minimum, step, lots)',
+                'RBPickClose(volumes, g.child_count, wanted, minimum, step, '
+                + '{get value() {return lots;}, set value(v) {lots = v;}})');
+    }
     if (name === 'RRHash')
         body = body.replace('hash = (hash ^ StringGetCharacter(value, i)) * 16777619;',
             'hash = Math.imul(hash ^ StringGetCharacter(value, i), 16777619) >>> 0;');
@@ -66,7 +79,7 @@ function extract(name, text = source) {
 let env;
 const names = ['ACCOUNT_SERVER', 'ACCOUNT_LOGIN', 'POSITION_IDENTIFIER', 'POSITION_TYPE', 'POSITION_TYPE_BUY',
     'POSITION_SYMBOL', 'POSITION_VOLUME', 'POSITION_TIME_UPDATE_MSC', 'SYMBOL_VOLUME_STEP', 'SYMBOL_VOLUME_MIN',
-    'SYMBOL_VOLUME_MAX', 'SYMBOL_FILLING_MODE', 'SYMBOL_TRADE_EXEMODE', 'SYMBOL_TRADE_EXECUTION_INSTANT',
+    'SYMBOL_VOLUME_MAX', 'SYMBOL_TRADE_TICK_SIZE', 'SYMBOL_DIGITS', 'SYMBOL_FILLING_MODE', 'SYMBOL_TRADE_EXEMODE', 'SYMBOL_TRADE_EXECUTION_INSTANT',
     'SYMBOL_TRADE_EXECUTION_REQUEST', 'ORDER_FILLING_FOK', 'ORDER_FILLING_IOC', 'TRADE_ACTION_DEAL', 'TRADE_ACTION_REMOVE',
     'ORDER_TYPE_BUY', 'ORDER_TYPE_SELL', 'ORDER_TYPE_BUY_LIMIT', 'ORDER_TYPE_SELL_LIMIT', 'ORDER_TYPE_BUY_STOP',
     'ORDER_TYPE_SELL_STOP', 'ORDER_TYPE_BUY_STOP_LIMIT', 'ORDER_TYPE_SELL_STOP_LIMIT', 'ORDER_STATE_FILLED',
@@ -160,8 +173,8 @@ const context = vm.createContext({
     PositionGetString: () => env.selectedPosition?.symbol,
     PositionGetDouble: () => env.selectedPosition?.volume,
     SymbolInfoDouble: (_symbol, key) => ({ SYMBOL_VOLUME_STEP: env.step, SYMBOL_VOLUME_MIN: env.minimum,
-        SYMBOL_VOLUME_MAX: env.maximum })[key],
-    SymbolInfoInteger: (_symbol, key) => key === 'SYMBOL_FILLING_MODE' ? env.fill : env.execution,
+        SYMBOL_VOLUME_MAX: env.maximum, SYMBOL_TRADE_TICK_SIZE: 0.01 })[key],
+    SymbolInfoInteger: (_symbol, key) => key === 'SYMBOL_DIGITS' ? 2 : (key === 'SYMBOL_FILLING_MODE' ? env.fill : env.execution),
     SymbolInfoTick: (_symbol, tick) => { Object.assign(tick, { bid: env.bid, ask: env.ask }); return env.hasQuote; },
     HistorySelectByPosition: id => { env.historyId = id; return env.hasHistory; },
     HistoryOrdersTotal: () => env.orders.filter(o => !o.active && o.positionId === env.historyId).length,
@@ -498,6 +511,135 @@ check('two completed 25 percent clicks compound remaining volume and do not clos
     assert.equal(env.sent.length, 2); assert.equal(env.sent[1].volume, 0.3);
     assert.equal(saved().target_remaining, 0.9);
     assert.ok(Math.abs((1.6 - saved().target_remaining) / 1.6 * 100 - 43.75) < 1e-8);
+});
+
+// Parent orchestration uses the actual manual journal/executor/history functions
+// above. Only the parent position snapshot and unrelated risk/stop boundaries
+// are simulated (their full implementations are covered by rr_batch_exits).
+Object.assign(context, {
+    RB_MAX_CHILDREN: 64, RB_ENTRY_BUILDING: 0, RR_Enable: false,
+    RBGroupSymbol: () => 'TEST', RBManageGroupRisk: () => false, RBGroupGuardLatched: () => false,
+    RBUpdateGroupStops: () => true, RRTargetReached: () => false,
+    RRStateClosesAll: s => s.target_percent.reduce((sum, p) => sum + p, 0) === 100,
+    RBSaveGroup: (_handle, g) => { env.savedParent = clone(g); return true; },
+    RRNotice: text => env.notices.push(text),
+    RBGroupVolumes: (g, remaining, tp, volumes) => {
+        remaining.value = 0; tp.value = 0; volumes.fill(0);
+        g.child_id.forEach((id, i) => {
+            volumes[i] = env.positions.find(p => p.id === id)?.volume ?? 0;
+            remaining.value += volumes[i];
+        });
+        remaining.value = Number(remaining.value.toFixed(8));
+        return true;
+    },
+});
+for (const name of ['RBManualTarget', 'RBPickClose', 'RBClosedGoal', 'RBGroupCloseBusy', 'RBManageGroupLocked'])
+    vm.runInContext(extract(name, batch), context, { filename: 'production:parent:' + name });
+
+function parentTask(percent = 50, volumes = [3, 3, 3, 3]) {
+    context.RR_Enable = false;
+    env.positions = volumes.map((volume, i) => position({ id: 42 + i, ticket: 456 + i, volume }));
+    const total = volumes.reduce((sum, volume) => sum + volume, 0);
+    const g = { parent_id: 700, child_count: volumes.length, child_id: volumes.map((_, i) => 42 + i),
+        exit_ready: 1, entry_state: 1, pending: 0, magic: 123, direction: 1,
+        manual_active: 1, manual_target_remaining: context.RBManualTarget(total, percent, env.step),
+        manual_created: env.now, manual_completed: 0,
+        exit_state: { blocked: 0, initial_volume: total, stage: 0, target_count: 2,
+            entry: 100, risk: 10, target_r: [2, 5], target_percent: [50, 50], target_be: [0, 0] } };
+    env.savedParent = clone(g);
+    return g;
+}
+function parentCycle(g) {
+    context.RBManageGroupLocked(900, g);
+    assert.equal(env.handles.size, 0, 'parent releases every child journal handle');
+}
+function fillLastParentClose({ terminal = true } = {}) {
+    const req = env.sent.at(-1), pos = env.positions.find(p => p.ticket === req.position);
+    assert.ok(pos, 'fill must refer to the selected live child');
+    const id = pos.id, ticket = saved(id).pending_order;
+    env.orders.push(order({ ticket, positionId: id, comment: req.comment, initial: req.volume, active: !terminal }));
+    pos.volume = Number((pos.volume - req.volume).toFixed(8));
+    if (pos.volume === 0) env.positions = env.positions.filter(p => p.id !== id);
+    env.resultOrder++; env.now += 4;
+    return id;
+}
+check('parent 4 x 3 lots at 50 percent settles vanished child and closes exactly 6 lots', () => {
+    const g = parentTask(); assert.equal(g.manual_target_remaining, 6);
+    parentCycle(g); manage(); assert.equal(env.sent.length, 1); assert.equal(env.sent[0].volume, 3);
+    const first = fillLastParentClose();
+    manage(); assert.equal(saved(first).complete, 0, 'ordinary manager cannot see the vanished child');
+    parentCycle(g); assert.equal(saved(first).complete, 1, 'parent confirms the vanished journal from history');
+    manage(); assert.equal(env.sent.length, 2); assert.equal(env.sent[1].volume, 3);
+    const second = fillLastParentClose();
+    parentCycle(g); manage(); parentCycle(g);
+    assert.equal(saved(second).complete, 1); assert.equal(g.manual_active, 0);
+    assert.equal(env.positions.reduce((sum, p) => sum + p.volume, 0), 6);
+    assert.equal(env.sent.length, 2, 'repeated ticks cannot close the remaining 6 lots');
+});
+check('parent resumes persisted 50 percent target after first child disappeared before restart', () => {
+    let g = parentTask(); parentCycle(g); manage(); fillLastParentClose();
+    g = clone(env.savedParent); parentCycle(g); manage(); fillLastParentClose(); parentCycle(g);
+    assert.equal(g.manual_target_remaining, 6); assert.equal(g.manual_active, 0);
+    assert.equal(env.sent.reduce((sum, req) => sum + req.volume, 0), 6);
+});
+check('parent waits for missing or active history before scheduling another child', () => {
+    const g = parentTask(); parentCycle(g); manage(); fillLastParentClose({ terminal: false });
+    const pending = clone(env.orders); env.orders = []; env.now = 10000;
+    parentCycle(g); manage(); assert.equal(env.sent.length, 1); assert.equal(saved().complete, 0);
+    env.orders = pending; parentCycle(g); manage(); assert.equal(env.sent.length, 1);
+    env.orders[0].active = false; parentCycle(g); manage(); assert.equal(env.sent.length, 2);
+});
+check('parent finds an ambiguous close by comment without submitting another copy', () => {
+    const g = parentTask(); parentCycle(g); env.resultOrder = 0; manage();
+    const req = env.sent[0]; env.positions = env.positions.filter(p => p.id !== 42);
+    parentCycle(g); manage(); assert.equal(env.sent.length, 1);
+    env.orders = [order({ ticket: 300, comment: req.comment, initial: 3 })];
+    env.resultOrder = 301; parentCycle(g); manage();
+    assert.equal(env.sent.length, 2); assert.equal(env.sent[1].position, 457);
+});
+check('parent cannot bypass a locked or corrupt vanished-child journal', () => {
+    const g = parentTask(); parentCycle(g); manage(); fillLastParentClose();
+    const path = context.RMExecutionFile(42); env.locks.add(path);
+    parentCycle(g); manage(); assert.equal(env.sent.length, 1);
+    env.locks.delete(path); saved().checksum++;
+    parentCycle(g); manage(); assert.equal(env.sent.length, 1);
+    assert.equal(g.manual_active, 1);
+});
+check('same identifier reappearing during parent history settlement blocks next child', () => {
+    const g = parentTask(); parentCycle(g); manage(); fillLastParentClose();
+    const original = context.HistoryOrderSelect;
+    context.HistoryOrderSelect = ticket => {
+        env.positions.push(position({ ticket: 999, volume: 3 }));
+        return original(ticket);
+    };
+    try {
+        parentCycle(g); assert.equal(saved().complete, 0);
+        assert.equal(env.sent.length, 1); assert.equal(saved(43), undefined);
+    } finally { context.HistoryOrderSelect = original; }
+});
+check('parent 100 percent closes all four children serially including final journal settlement', () => {
+    const g = parentTask(100);
+    for (let i = 0; i < 4; i++) {
+        parentCycle(g); manage(); assert.equal(env.sent.length, i + 1); fillLastParentClose();
+    }
+    parentCycle(g); manage(); assert.equal(g.manual_active, 0); assert.equal(env.positions.length, 0);
+    assert.equal(env.sent.reduce((sum, req) => sum + req.volume, 0), 12);
+    assert.ok(g.child_id.every(id => saved(id).complete === 1));
+});
+check('parent target ending inside the second child closes only the required partial volume', () => {
+    const g = parentTask(37.5); parentCycle(g); manage(); fillLastParentClose();
+    parentCycle(g); manage(); assert.equal(env.sent[1].volume, 1.5);
+    fillLastParentClose(); manage(); parentCycle(g);
+    assert.equal(g.manual_active, 0); assert.equal(env.positions.reduce((sum, p) => sum + p.volume, 0), 7.5);
+    assert.equal(env.sent.length, 2);
+});
+check('automatic 50 percent parent TP uses the same vanished-child settlement barrier', () => {
+    const g = parentTask(); g.manual_active = 0; g.exit_state.stage = 1; context.RR_Enable = true;
+    try {
+        parentCycle(g); manage(); fillLastParentClose(); parentCycle(g); manage(); fillLastParentClose();
+        parentCycle(g); manage(); assert.equal(env.sent.length, 2);
+        assert.equal(env.positions.reduce((sum, p) => sum + p.volume, 0), 6);
+    } finally { context.RR_Enable = false; }
 });
 console.log(`\n${passed} manual-execution tests passed against production function bodies.`);
 console.log('Scope: in-memory journals, positions and broker responses; no terminal files or trades.');

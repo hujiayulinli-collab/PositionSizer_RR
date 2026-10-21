@@ -115,8 +115,8 @@ bool RMComplete(const int handle, RMExecutionState &s, string &error)
     return RMExecutionSave(handle, s, error);
 }
 
-// Controller barrier for reverse entries: no position AND no unresolved manual
-// close. Unlike the ordinary status query this may settle a disappeared task.
+// Controller barrier for reverse entries and parent groups: no position AND no
+// unresolved manual close. Unlike a status query this may settle a vanished task.
 bool RMExitSettled(const ulong identifier)
 {
     if (identifier == 0 || RMSelectIdentifier(identifier) != 0) return false;

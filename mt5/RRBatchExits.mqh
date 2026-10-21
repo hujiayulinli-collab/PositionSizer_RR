@@ -127,7 +127,15 @@ bool RBGroupVolumes(const RBGroup &g, double &remaining, double &server_tp,
 bool RBGroupCloseBusy(const RBGroup &g)
 {
     for (int i = 0; i < g.child_count; i++)
-        if (g.child_id[i] != 0 && RMPositionExitActive(g.child_id[i])) return true;
+    {
+        ulong identifier = g.child_id[i];
+        if (identifier == 0 || !RMPositionExitActive(identifier)) continue;
+        // RMManage visits live positions only. A completely closed child must
+        // settle its journal here before the parent can reduce another child.
+        // Absence alone is not confirmation: RMExitSettled requires terminal
+        // order history for a pending request and rechecks that it is absent.
+        if (!RMExitSettled(identifier)) return true;
+    }
     return false;
 }
 

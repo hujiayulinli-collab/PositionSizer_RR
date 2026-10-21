@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "1.800" // Public v1.8.0 in MT5's two-part version format.
-string    Version = "1.8.0";
+#property version   "1.801" // Public v1.8.1 in MT5's two-part version format.
+string    Version = "1.8.1";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -37,6 +37,7 @@ bool RMGuardExitReady(const ulong identifier, const double volume, const double 
 #include "RRManualExecution.mqh"
 #include "RRTargetDrag.mqh"
 #include "RRTargetLines.mqh"
+#include "RRTargetEditor.mqh"
 #include "RRPanelRecovery.mqh"
 #include "Position Sizer.mqh";
 #include "Position Sizer Trading.mqh";
@@ -220,6 +221,7 @@ bool DetectedColorMode;
 
 int OnInit()
 {
+    RRCloseTargetEditor();
     RRDeleteTargetLines();
     RGDeleteStatus();
     RRPanelInitSucceeded = false;
@@ -638,12 +640,13 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] v1.8.0 公开版面板初始化完成。分批开仓支持最短100毫秒间隔，已包含持仓下拉点击修复。");
+    Print("[PS RR] v1.8.1 公开版面板初始化完成。父组平仓确认修复，TP 标注支持独立改价与图上选价。");
     return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
+    RRCloseTargetEditor();
     RRDeleteTargetLines();
     RGDeleteStatus();
     RRShutdown();
@@ -740,6 +743,22 @@ void OnChartEvent(const int id,
                   const double &dparam,
                   const string &sparam)
 {
+    // The TP editor owns its mouse/keyboard events before calculator hotkeys
+    // or panel controls can react. It never changes native trade-line settings.
+    if (RRPanelInitSucceeded && CheckPointer(ExtDialog) == POINTER_DYNAMIC)
+    {
+        string message;
+        ulong owner;
+        bool parent, saved;
+        if (RRHandleTargetEditorEvent(id, lparam, dparam, sparam, message, owner, parent, saved))
+        {
+            if (owner != 0) ExtDialog.NotifyRRTargetMoved(owner, parent, saved, message);
+            if (message != "") Print("[PS RR TP] ", message);
+            if (saved) RRRefreshViews(true);
+            ChartRedraw();
+            return;
+        }
+    }
     if ((id == CHARTEVENT_OBJECT_DRAG || id == CHARTEVENT_OBJECT_CHANGE)
         && StringFind(sparam, RRLinePrefix) == 0)
     {

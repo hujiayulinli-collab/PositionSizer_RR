@@ -93,7 +93,7 @@ void RRDrawTarget(const string key, const double price, const string caption,
     ObjectSetInteger(chart, line, OBJPROP_ZORDER, RRTargetLinePriority(line));
     ObjectSetString(chart, line, OBJPROP_TEXT, caption);
     ObjectSetString(chart, line, OBJPROP_TOOLTIP, caption + (editable
-        ? "\n双击选中后拖动，松开即保存；也可在线属性中填写价格。只修改此目标，比例与BE不变。同价重合时先在分仓止盈页选择持仓；对象列表按编号也可定位。"
+        ? "\n双击选中后拖动，松开即保存。与 MT5 止盈线重合时，单击上方标签的 [改价]，输入价格或图上选价后保存。比例与 BE 不变。"
         : "\n此目标仅供查看（新仓预览、已触发目标或管理暂停时不可拖动）。"));
 
     string label = key + "_Label";
@@ -101,16 +101,18 @@ void RRDrawTarget(const string key, const double price, const string caption,
     int x = 0, y = 0;
     datetime time = iTime(_Symbol, _Period, 0);
     int height = (int)ChartGetInteger(chart, CHART_HEIGHT_IN_PIXELS, 0);
-    string visible_caption = caption;
+    string visible_caption = caption + (editable ? "  [改价]" : "");
     bool located = time > 0 && ChartTimePriceToXY(chart, 0, time, price, x, y);
     if (!located)
     {
         ObjectSetString(chart, label, OBJPROP_TEXT, "");
         return;
     }
-    if (y < 26) { y = 26; visible_caption = "↑ 图外 | " + caption; }
-    else if (y > height - 20) { y = height - 20; visible_caption = "↓ 图外 | " + caption; }
-    y = RRPlaceTargetLabel(y - 2, height);
+    if (y < 26) { y = 26; visible_caption = "↑ 图外 | " + visible_caption; }
+    else if (y > height - 20) { y = height - 20; visible_caption = "↓ 图外 | " + visible_caption; }
+    // Leave a clear vertical gap above native SL/TP hit regions. Clicking the
+    // caption opens an independent editor instead of double-clicking the line.
+    y = RRPlaceTargetLabel(y - 12, height);
     ObjectSetInteger(chart, label, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
     ObjectSetInteger(chart, label, OBJPROP_ANCHOR, ANCHOR_RIGHT_LOWER);
     ObjectSetInteger(chart, label, OBJPROP_XDISTANCE, 12);
@@ -120,9 +122,11 @@ void RRDrawTarget(const string key, const double price, const string caption,
     ObjectSetInteger(chart, label, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(chart, label, OBJPROP_HIDDEN, true);
     ObjectSetInteger(chart, label, OBJPROP_BACK, false);
+    ObjectSetInteger(chart, label, OBJPROP_ZORDER, editable ? 100 + RRTargetLinePriority(line) : 0);
     ObjectSetString(chart, label, OBJPROP_FONT, "Microsoft YaHei");
     ObjectSetString(chart, label, OBJPROP_TEXT, visible_caption);
-    ObjectSetString(chart, label, OBJPROP_TOOLTIP, caption);
+    ObjectSetString(chart, label, OBJPROP_TOOLTIP, caption + (editable
+        ? "\n单击 [改价] 标签：输入精确价格，或图上选价后保存；不修改比例或 BE。" : ""));
 }
 
 void RRPruneTargetRows(const string owner_prefix, const int count)

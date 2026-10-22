@@ -7764,7 +7764,7 @@ double BrokerizePositionSize(const double position_size)
     {
         return 0; // Not taking this trade, so PS = 0.
     }
-    else if ((position_size > MaxLot) && (!SurpassBrokerMaxPositionSize) && (!RBEnabled))
+    else if ((position_size > MaxLot) && (!SurpassBrokerMaxPositionSize) && (!(RBEnabled && sets.EntryType == Instant)))
     {
         return MaxLot;
     }
@@ -9316,7 +9316,7 @@ void PositionSizeToArray(double ps)
 double AdjustPositionSizeByMinMaxStep(double ps)
 {
     if (ps < MinLot) ps = MinLot;
-    else if ((ps > MaxLot) && (!SurpassBrokerMaxPositionSize) && (!RBEnabled)) ps = MaxLot;
+    else if ((ps > MaxLot) && (!SurpassBrokerMaxPositionSize) && (!(RBEnabled && sets.EntryType == Instant))) ps = MaxLot;
     double steps = 0;
     if (LotStep != 0) steps = ps / LotStep;
     if (MathAbs(MathRound(steps) - steps) < 0.00000001) steps = MathRound(steps);

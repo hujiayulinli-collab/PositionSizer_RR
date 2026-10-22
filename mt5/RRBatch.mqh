@@ -766,7 +766,7 @@ void RBInit()
 {
     RBActiveParent = 0; RBOwnerAccount = ""; RBLastSendTick = 0; RBCorruptJournal = false;
     if (!RBLoadSettings()) RBLastStatus = "分批设置读取失败，暂停分批开仓。";
-    else RBLastStatus = RBEnabled ? "分批开仓已启用；点击交易建立父订单。" : "分批开仓未启用";
+    else RBLastStatus = RBEnabled ? "分批开仓已启用；仅市价建立父订单，挂单正常提交。" : "分批开仓未启用";
     // Only the process acquiring the account lock may mark an abandoned queue.
     // A different live chart can continue its own queue without being cancelled.
     int owner = FileOpen(RBAccountLockName(), FILE_READ | FILE_WRITE | FILE_BIN);

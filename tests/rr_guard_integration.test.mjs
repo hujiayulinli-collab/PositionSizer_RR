@@ -268,7 +268,7 @@ check('actual entry preflight checks money guard even when RR is disabled', () =
 check('entry reloads shared batch settings and refuses unreadable or newly enabled unsupported mode', () => {
     for (const readable of [false, true]) {
         const events=[];
-        const context=vm.createContext({RBEnabled:false,RR_Enable:false,sets:{MagicNumber:321},
+        const context=vm.createContext({RBEnabled:false,RR_Enable:false,Instant:0,sets:{MagicNumber:321,EntryType:0},
             RGCanOpen:()=>true,Alert:()=>events.push('blocked')});
         context.RBLoadSettings=()=>{events.push('load');context.RBEnabled=true;return readable;};
         install(context,tradingSource,'RRBeforeTrade');

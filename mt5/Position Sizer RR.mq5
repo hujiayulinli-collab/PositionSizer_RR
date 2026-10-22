@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "1.802" // Public v1.8.2 in MT5's two-part version format.
-string    Version = "1.8.2";
+#property version   "1.803" // Public v1.8.3 in MT5's two-part version format.
+string    Version = "1.8.3";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -640,7 +640,7 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] v1.8.2 公开版面板初始化完成。分仓TP由EA监控并市价执行，不挂服务器TP；请保持联网与算法交易权限。");
+    Print("[PS RR] v1.8.3 公开版面板初始化完成。分批仅用于市价单，挂单正常提交；分仓TP由EA到价市价执行，请保持联网与算法交易权限。");
     return INIT_SUCCEEDED;
 }
 

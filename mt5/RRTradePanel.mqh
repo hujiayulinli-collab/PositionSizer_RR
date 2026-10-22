@@ -31,7 +31,7 @@ bool CPositionSizeCalculator::CreateTradeControlOptions()
     m_LblReverseStatus.FontSize(9);
     m_BtnCancelReverse.FontSize(9);
     y += (int)MathRound(24 * m_DPIScale);
-    if (!CheckBoxCreate(TradingTabList, m_ChkBatchEnabled, x, y, right, y + h, "m_ChkBatchEnabled", "启用父订单分批开仓（市价 / 对冲）", "统一子单上限；保存后生效，不修改正在执行的父订单")) return false;
+    if (!CheckBoxCreate(TradingTabList, m_ChkBatchEnabled, x, y, right, y + h, "m_ChkBatchEnabled", "启用父订单分批开仓（市价 / 对冲）", "仅市价分批；挂单正常提交、不拆子单。统一子单上限；保存后生效，不修改正在执行的父订单")) return false;
     m_ChkBatchEnabled.Checked(RBEnabled);
     ObjectSetInteger(m_chart_id, m_name + "m_ChkBatchEnabledLabel", OBJPROP_FONTSIZE, 9);
     y += (int)MathRound(24 * m_DPIScale);
@@ -173,7 +173,7 @@ void CPositionSizeCalculator::OnClickBatchSave()
         m_batch_feedback = error; m_batch_feedback_error = true;
         RefreshBatchStatus(); return;
     }
-    m_batch_feedback = "分批设置已保存，仅影响新父订单；100毫秒=0.1秒，仍等成交与止损确认。";
+    m_batch_feedback = "分批设置已保存，仅影响新父订单；挂单正常提交、不拆子单。100毫秒=0.1秒，仍等成交与止损确认。";
     m_batch_feedback_error = false;
     RefreshValues();
     RefreshBatchStatus();
@@ -199,7 +199,7 @@ void CPositionSizeCalculator::RefreshBatchStatus()
 {
     // Do not reload edits here: timers must preserve unfinished settings drafts.
     string status = RBStatusText();
-    if (status == "") status = RBEnabled ? "分批已启用；按主页面整组风险创建父订单。" : "分批未启用；填写后点击保存并应用。";
+    if (status == "") status = RBEnabled ? "分批已启用：仅市价分批；挂单正常提交、不拆子单。" : "分批未启用；填写后点击保存并应用。";
     if (m_batch_feedback != "") status = m_batch_feedback_error ? m_batch_feedback + " · " + status : status + " · " + m_batch_feedback;
     m_LblBatchStatus.Text(StringSubstr(status, 0, 25));
     m_LblBatchStatus2.Text(StringSubstr(status, 25, 25));

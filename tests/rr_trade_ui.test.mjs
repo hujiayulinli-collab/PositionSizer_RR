@@ -79,8 +79,8 @@ function fixture(scale = 1, savedIntervalMilliseconds = 1000) {
     for (const name of ['m_LblEntryLevel', 'm_LblStopPrice', 'm_LblRiskM']) {
         const c = new Control(); c.rect = [7, 69, 310, 89]; s.MainTabList.nodes.push({ Name: name, Obj: c });
     }
-    for (const type of ['Edit', 'Button', 'CheckBox', 'Label']) s[type + 'Create'] = (list, c, x1, y1, x2, y2, name, text) => {
-        c.rect = [x1, y1 + 24, x2, y2 + 24]; c.Text(text); list.nodes.push({ Name: name, Obj: c }); return true;
+    for (const type of ['Edit', 'Button', 'CheckBox', 'Label']) s[type + 'Create'] = (list, c, x1, y1, x2, y2, name, text, tooltip = '') => {
+        c.rect = [x1, y1 + 24, x2, y2 + 24]; c.Text(text); c.tooltip = tooltip; list.nodes.push({ Name: name, Obj: c }); return true;
     };
     s.ComboBoxCreate = (list, c, x1, y1, x2, y2, name) => s.EditCreate(list, c, x1, y1, x2, y2, name, '');
     vm.createContext(s);
@@ -172,6 +172,23 @@ check('saving valid batch settings delegates once and recalculates whole group v
     s.m_ChkBatchEnabled.Checked(true); s.m_EdtBatchLots.Text('2.5'); s.m_EdtBatchInterval.Text('250'); s.m_EdtBatchDeviation.Text('30'); s.OnClickBatchSave();
     assert.deepEqual(s.batchSaveCalls, [{ enabled: true, lots: 2.5, interval: 250, deviation: 30 }]); assert.equal(s.refreshValuesCalls, 1);
     assert.equal(s.RBEnabled, true); assert.equal(s.batchActive, false); assert.equal(s.optionCalls.length, 0);
+    assert.match(s.m_batch_feedback, /挂单正常提交、不拆子单/);
+});
+check('batch help distinguishes market-only splitting from ordinary pending submission', () => {
+    const s = fixture();
+    assert.match(s.m_ChkBatchEnabled.tooltip, /仅市价分批；挂单正常提交、不拆子单/);
+    assert.match(s.m_ChkBatchEnabled.tooltip, /不修改正在执行的父订单/);
+    s.RBEnabled = true; s.refresh();
+    assert.match(s.tooltips.get('panelm_LblBatchStatus'), /仅市价分批；挂单正常提交、不拆子单/);
+    assert.equal(s.batchSaveCalls.length, 0); assert.equal(s.batchCancelCalls, 0);
+});
+check('real batch warnings and progress retain priority over market-only default help', () => {
+    for (const status of ['父ID 123456 · 已成交 15 / 40 手 · 第4个子单等待', '父订单暂停：风控锁定，请检查账户状态。']) {
+        const s = fixture(); s.RBEnabled = true; s.batchActive = true; s.batchStatus = status; s.refresh();
+        assert.equal(s.tooltips.get('panelm_LblBatchStatus'), status);
+        assert.equal(s.m_LblBatchStatus.Text(), status.substr(0, 25));
+        assert.equal(s.m_BtnBatchCancel.enabled, true); assert.equal(s.batchCancelCalls, 0);
+    }
 });
 check('malformed or unsafe batch values cannot reach persistence or alter calculator sizing', () => {
     for (const [field, value] of [['Lots', '0'], ['Lots', '-5'], ['Lots', '2..'], ['Interval', '0'], ['Interval', '1'], ['Interval', '99'], ['Interval', '100.5'], ['Interval', '250.5'], ['Interval', '3600001'], ['Interval', '100ms'], ['Deviation', '-1'], ['Deviation', '1.5'], ['Deviation', '2147483648']]) {

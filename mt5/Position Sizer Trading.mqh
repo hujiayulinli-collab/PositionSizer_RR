@@ -47,9 +47,11 @@ bool RRBeforeTrade()
         Alert("分批设置读取失败，暂不开新仓；请核对交易页已保存设置。");
         return false;
     }
-    if (RBEnabled && (!RR_Enable || sets.EntryType != Instant || AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING))
+    // The saved batch option applies only to immediate market entries. Pending
+    // and Stop Limit orders keep their ordinary broker-side submission path.
+    if (RBEnabled && sets.EntryType == Instant && (!RR_Enable || AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING))
     {
-        Alert("分批开仓需要启用分仓止盈，并使用对冲账户的即时市价单。当前设置不支持分批，请关闭分批或更换订单类型。");
+        Alert("市价分批开仓需要启用分仓止盈并使用对冲账户；挂单仍按普通方式提交。请核对当前市价分批设置。");
         return false;
     }
     if (!RR_Enable) return true;
@@ -666,7 +668,7 @@ void RCTradeCore()
         }
         if (RCQueueReverse(PositionSize)) { delete Trade; return; }
         if (closing_opposite_first) { delete Trade; Alert("原反向仓刚已变化，请重新检查并点击交易。"); return; }
-        if (RBEnabled)
+        if (RBEnabled && sets.EntryType == Instant)
         {
             string batch_error;
             if (!RBQueue(PositionSize, batch_error)) Alert("分批开仓未开始：", batch_error);

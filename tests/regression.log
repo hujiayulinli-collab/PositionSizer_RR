@@ -73,7 +73,7 @@ PASS 72: updating a legacy parent appends the same v1 seconds format and checksu
 PASS 73: new parent freezes the v2 millisecond setting without changing disk field layout
 PASS 74: parent journal includes manual/risk exit state in checksum
 74 batch-entry checks passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_batch_entry.test.mjs (79.3893ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_batch_entry.test.mjs (80.7264ms)
 PASS group 50% of two minimum children closes one full child
 PASS manual percentage uses current group remainder and freezes the target
 PASS partial execution and reload keep the original fixed target
@@ -105,6 +105,8 @@ PASS retained remainder clears every child TP but keeps SL
 PASS full-exit plan removes legacy child TPs without changing SL or unrelated positions
 PASS disabled RR does not remove an existing parent server TP
 PASS legacy TP removal retries after rejection and never reinstalls a server target
+PASS two current instances share durable parent stages without installing TP or duplicating child exits
+PASS an external writer can reintroduce final TP but current shared managers clear it without weakening SL or BE
 PASS buy final virtual TP waits for bid then closes every remaining child serially across reload
 PASS sell final virtual TP waits for ask and requests the remaining child market close
 PASS failed BE is retried without sending another reduction
@@ -123,8 +125,8 @@ PASS risk refuses a child whose entry history was enlarged then reduced
 PASS already synchronized protection does not append idle parent records
 PASS a stop journal failure prevents this cycle from dispatching a reduction
 PASS sell targets use ask and BE preserves a better lower sell stop
-49 batch group exit checks passed
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_batch_exits.test.mjs (70.3651ms)
+51 batch group exit checks passed
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_batch_exits.test.mjs (90.605ms)
 PASS missing option defaults off and does not create a saved setting
 PASS verified setting survives a new panel and shares account namespace
 PASS saved option is bound to account and server
@@ -185,7 +187,7 @@ PASS a started parent retains the symbol lock until entry reconciliation complet
 
 57 central-controller tests passed against production function bodies.
 Scope: in-memory options, reverse queue, positions and entry calls; no terminal files or trades.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_central.test.mjs (159.8245ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_central.test.mjs (196.0702ms)
 PASS XAU sell triggers at exact 2R tick despite frozen binary risk
 PASS XAU sell triggers at exact 5R tick despite frozen binary risk
 PASS sell Bid reaching alone does not trigger
@@ -252,7 +254,7 @@ PASS both directions: executable final price never precedes requested R
 
 63 tests passed against D:\codex\tradingIndicators\PositionSizer_RR\mt5\RRCore.mqh
 Scope: pure calculations only; terminal execution, persistence and broker behaviour require the demo scenarios in MANUAL_TESTS.md.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_core.test.mjs (59.2228ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_core.test.mjs (61.3039ms)
 ok 1 - initialization does not scan history or replay existing deals
 ok 2 - only trade DEAL_ADD callbacks enter the queue
 ok 3 - transaction callback queues work without blocking on history or playing audio
@@ -281,7 +283,7 @@ ok 25 - 64-bit deal identifiers remain exact in deduplication keys
 ok 26 - notification implementation has no trading or broad-history replay APIs
 ok 27 - successful submission cannot bypass the panel sound switch through the original success tone
 RR deal alerts: 27 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_deal_alerts.test.mjs (82.4509ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_deal_alerts.test.mjs (108.6219ms)
 ok 1 - production OnChartEvent uses the native dispatcher exactly once without direct OnEvent fallback
 ok 2 - object edits preserve all event arguments and focus priorities after native dispatch
 ok 3 - chart changes stay excluded from the native automatic minimization path
@@ -295,7 +297,7 @@ ok 10 - ordinary custom changes still reach standard OnEvent exactly once and re
 ok 11 - dialog native mouse override preserves visible event traversal and rejects a hidden container
 ok 12 - holding chooser native mouse override preserves visible event traversal and rejects a hidden container
 RR dropdown events: 12 offline production-boundary tests passed; live MT5 UI not exercised.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_dropdown_events.test.mjs (74.0553ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_dropdown_events.test.mjs (68.8399ms)
 ok 1 - runner entry uses TP zero while keeping the last target preview intact
 ok 2 - full-exit RR entry also uses virtual TP and keeps preview separate
 ok 3 - RR-disabled original entry preserves the ordinary TP
@@ -312,7 +314,7 @@ ok 13 - RR-disabled confirmation preserves the original actual server TP
 ok 14 - virtual TP entry permits DoNotApplyTakeProfit but still requires server SL and a valid target preview
 ok 15 - BE-only entry has no forced server TP and clearly retains 100 percent
 15 entry TP checks passed
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_entry_tp.test.mjs (65.7734ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_entry_tp.test.mjs (80.1069ms)
 ok 1 - threshold is inclusive and zero/nonfinite limits cannot trigger
 ok 2 - server day normalization handles midnight and unavailable time
 ok 3 - today accounting includes trade profit swap commission fee and excludes cash operations
@@ -350,7 +352,7 @@ ok 34 - truncated journal record is rejected and no guard execution starts
 ok 35 - account or broker changes reset cached totals and choose a different daily record
 ok 36 - input validation rejects negative nonfinite limits and unknown position scope
 RR guard: 36 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard.test.mjs (99.7276ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard.test.mjs (109.9001ms)
 PASS new latch saves and alarms before preflight/send with exact hedging ticket
 PASS disabled trading still latches once and resumes after permission restores
 PASS empty key cannot adopt a fresh position
@@ -399,7 +401,7 @@ PASS risk cannot send while a manual close result is unresolved
 
 45 guard execution tests passed against actual production function bodies.
 Scope: simulated MT5 file/order/position boundaries only; no terminal journals, UI operations or real trades.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_execution.test.mjs (74.8561ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_execution.test.mjs (88.803ms)
 PASS without post-lock check, first-file race reaches both emergency and ordinary execution
 PASS production rechecks after first journal lock and suppresses ordinary exit in the race
 PASS an existing emergency latch skips ordinary journal and execution entirely
@@ -445,7 +447,7 @@ PASS initialization loads shared settings before controls and keeps the settings
 
 42 guard integration tests passed against production functions.
 Scope: in-memory scheduling and boundary simulation, plus source contracts for the full trading form. No live trading.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_integration.test.mjs (97.0314ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_integration.test.mjs (129.356ms)
 PASS first init and repeated sync keep input defaults without creating a journal
 PASS explicit first save validates, flushes, reads back and publishes every setting
 PASS the POD record contains no dynamic strings and has bounded UTF-16 fields
@@ -489,7 +491,7 @@ PASS oversized invalid input defaults cannot cause an out-of-bounds restore on a
 
 40 account-settings tests passed against production function bodies.
 Scope: in-memory binary files and account context; no terminal files, UI or trades.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_settings.test.mjs (164.4984ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_settings.test.mjs (182.228ms)
 ok 1 - initial controls load all seven current saved account values
 ok 2 - typing scope and checkbox changes stay drafts without changing active settings
 ok 3 - valid explicit save applies exact draft values with the loaded revision
@@ -517,7 +519,7 @@ ok 24 - seven actual tab definitions retain legible fonts and disjoint button re
 ok 25 - explicit reload synchronizes the account record before discarding a draft
 ok 26 - draft and rendering methods do not call trading manager executors or audio playback
 RR guard UI: 26 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_ui.test.mjs (111.596ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_guard_ui.test.mjs (129.6482ms)
 PASS legacy scalar field order still matches the released schema
 PASS v2 retains scalar prefix and adds all 20 target slots
 PASS legacy conversion preserves every scalar and clears new target fields
@@ -553,7 +555,7 @@ PASS released v1 and full-exit v2 records retain full-exit interpretation
 
 32 journal tests passed against production save/load and conversion functions.
 Scope: binary schema and state decisions with a simulated MQL file boundary; native packing and durable storage still require terminal validation.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_journal.test.mjs (105.0574ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_journal.test.mjs (122.6818ms)
 PASS read returns frozen plan and ticket without writes
 PASS read legacy plan as two targets without migration
 PASS read never adopts a position without journal
@@ -610,7 +612,7 @@ PASS manual exit intent arising during journal lock acquisition prevents plan wr
 
 53 live-plan tests passed against production APIs.
 Scope: in-memory MT5 boundaries; no real positions, journal files, or trading requests.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_live_plan.test.mjs (95.8011ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_live_plan.test.mjs (103.9715ms)
 PASS below 2R updates stops without reducing
 PASS 2R intent is saved before requesting half close
 PASS first partial fill is topped up only to the initial half
@@ -744,7 +746,7 @@ PASS legacy protection modification reselects the position before any subsequent
 
 130 manager tests passed against production management, capture, execution and reinitialization functions.
 Scope: simulated MT5 boundaries; no real trading requests, terminal compilation or journal IO.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manager.test.mjs (125.7466ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manager.test.mjs (175.8906ms)
 PASS registration freezes current remaining volume and does not send a manual trade
 PASS first execution binds exact hedging ticket and persists before sending
 PASS duplicate active clicks cannot recompute percentage or create another request
@@ -802,7 +804,7 @@ PASS automatic 50 percent parent TP uses the same vanished-child settlement barr
 
 54 manual-execution tests passed against production function bodies.
 Scope: in-memory journals, positions and broker responses; no terminal files or trades.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manual_execution.test.mjs (116.3018ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_manual_execution.test.mjs (149.5936ms)
 PASS old production callback reproduces invalid RiskTabList access
 PASS old early Minimize prematurely saves panel settings
 PASS constructor initialization explicitly clears lifecycle state and all lists
@@ -846,7 +848,7 @@ PASS a user price line carrying an RR-like Caption name cannot initiate cleanup
 
 40 lifecycle tests passed; the preserved pre-fix methods reproduce the reported null-list failure.
 Scope: actual MQL panel method bodies with simulated MT5 boundaries; visual terminal checks remain necessary.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_panel_lifecycle.test.mjs (531.5995ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_panel_lifecycle.test.mjs (687.8299ms)
 ok 1 - batch enabled sends ordinary BUY_LIMIT with original price, SL and expiry
 ok 2 - batch enabled sends ordinary BUY_STOP with original price, SL and expiry
 ok 3 - batch enabled sends ordinary BUY_STOP_LIMIT with original price, SL and expiry
@@ -873,7 +875,7 @@ ok 23 - legacy explicit SurpassBrokerMaxPositionSize keeps its original non-RR p
 ok 24 - RR pending still rejects the incompatible legacy SurpassBrokerMaxPositionSize option
 ok 25 - pending lot-step alignment remains intact with batch mode enabled
 25 pending entry routing checks passed
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_pending_entry.test.mjs (144.9403ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_pending_entry.test.mjs (176.7992ms)
 PASS target limit is exactly 20
 PASS single final exit is valid
 PASS legacy two-target default is valid
@@ -934,7 +936,7 @@ PASS all 1..20 equal-share target counts handle exact step quantities
 
 57 tests passed against production RRPlan.mqh functions.
 Scope: input validation and planned quantities; broker execution and binary file durability are tested separately.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan.test.mjs (78.1086ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan.test.mjs (85.1388ms)
 ok 1 - saved plan loads R, percentage and BE independently
 ok 2 - unused rows are hidden and visible targets stay visible
 ok 3 - typing and BE edits remain a draft until save
@@ -1031,7 +1033,7 @@ ok 93 - uncreated panel with an empty prefix never changes chart objects
 ok 94 - full-exit single and parent plans with zero TP show EA execution rather than missing protection
 ok 95 - paused virtual manager distinguishes existing server TP from no server TP
 RR plan UI: 95 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan_ui.test.mjs (284.5525ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_plan_ui.test.mjs (351.6857ms)
 ok 1 - shared default filename is stable across chart and trading symbol
 ok 2 - shared default is isolated by both account login and broker server
 ok 3 - filename preserves large account/chart identifiers without floating point truncation
@@ -1061,7 +1063,7 @@ ok 26 - different account login prevents common control application without part
 ok 27 - same login on a different broker server cannot inherit common control values
 ok 28 - subsequent capture carries the newly edited risk while each symbol keeps its own prices
 RR shared settings: 28 production-function tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_shared_settings.test.mjs (109.0534ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_shared_settings.test.mjs (135.3354ms)
 PASS buy target drag saves exact tick price and preserves other stages, percent and BE
 PASS sell drag uses frozen opening price and returns legal target without changing SL or volume
 PASS fractional tick drop snaps to nearest legal exchange price
@@ -1094,27 +1096,17 @@ PASS preview, unknown names and removed objects never authorize writes
 PASS reset removes every stale drag snapshot
 PASS entry routes drag and properties edits before the legacy calculator event branch
 31 target drag checks passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_target_drag.test.mjs (130.9229ms)
-PASS caption click opens one editor without changing TP or sending a save
-PASS exact price save preserves frozen parent identity and closes only editor objects
-PASS redrawn snapshot cannot replace the editor generation or typed price
-PASS rejected save keeps saved line unchanged and leaves price available for correction
-PASS pick mouse move is preview only; one click fills price, explicit save persists
-PASS pick ignores the editor hitbox, invalid coordinates, indicator subwindows and failed conversion
-PASS escape and cancel discard preview without a save and remove only owned editor objects
-PASS typing and edit completion are consumed so calculator trade hotkeys do not run
-PASS raw mouse over editor is consumed before covered calculator controls can respond
-PASS price parser rejects malformed or nonpositive values without calling save
-PASS positive plain decimal and surrounding whitespace are supported
-PASS preview, noneditable, missing or unknown label never opens an editor
-PASS opening a different target discards unsaved input and binds only the new owner
-PASS failed UI creation leaves no active or partial editor
-PASS 100 125 150 and 200 percent DPI keep all controls inside wide and 320 pixel charts
-PASS short chart caps editor height and invalid screen DPI falls back to normal scale
-PASS resize updates geometry and hit testing without changing typed price frozen snapshot or pick state
-PASS independent editor does not trade or change native trade-level chart settings
-18 target editor checks passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_target_editor.test.mjs (111.7317ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_target_drag.test.mjs (139.2798ms)
+PASS custom editor module and entry hooks are absent
+PASS upgrade cleanup removes old editor, preview and caption objects without touching other chart objects
+PASS empty or repeated cleanup remains harmless
+PASS both initialization and unloading run the minimal cleanup
+PASS active TP remains draggable and its label is descriptive without a competing click priority
+PASS redraw replaces any old clickable caption without opening a window or selecting a target
+PASS read-only targets do not invite edits or inherit an old selected state
+PASS drag routing and panel focus remain, with no editor mouse or keyboard interception
+8 target editor removal checks passed.
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_target_editor.test.mjs (93.1815ms)
 ok 1 - managed target uses frozen fill rather than current calculator entry
 ok 2 - all matching managed positions have separate names
 ok 3 - triggered target stays at original level with triggered status
@@ -1155,7 +1147,7 @@ ok 37 - parent exposes one independently editable target grid and children never
 ok 38 - full-exit position and parent with TP zero show local targets without a server-sync warning
 ok 39 - paused manager reports surviving old server TP without promising cancellation
 39 chart annotations checks passed
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_target_lines.test.mjs (106.4399ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_target_lines.test.mjs (121.9517ms)
 ok 1 - creation loads unchecked reverse option without trading callbacks
 ok 2 - reverse checkbox applies account setting through persistence callback only
 ok 3 - failed reverse option save restores the actually applied checkbox and shows the error
@@ -1186,7 +1178,7 @@ ok 27 - real trading layout stays compact on both subpages at 100 to 200 percent
 ok 28 - subpage visibility honors newly inserted TP controls and historical hidden flags
 ok 29 - subpage callbacks before readiness cannot touch panel layout or selection
 RR trade UI: 29 production-method tests passed.
-✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_trade_ui.test.mjs (110.0124ms)
+✔ D:\codex\tradingIndicators\PositionSizer_RR\tests\rr_trade_ui.test.mjs (139.1363ms)
 ℹ tests 25
 ℹ suites 0
 ℹ pass 25
@@ -1194,4 +1186,4 @@ RR trade UI: 29 production-method tests passed.
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 614.9768
+ℹ duration_ms 781.1367

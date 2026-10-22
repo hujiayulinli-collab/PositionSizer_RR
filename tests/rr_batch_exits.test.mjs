@@ -117,7 +117,15 @@ const context = vm.createContext({ ...Object.fromEntries(constants.map(x => [x, 
     RDPlayRiskAlert: text => env.alerts.push(text),
     RGExitPosition: (ticket, key, magic) => { env.guardRequests.push({ ticket, key, magic }); return true; },
     RRNotice: text => env.notices.push(text), RRCanTrade: () => env.canTrade,
-    OrderSend: (req, result) => { env.stopRequests.push(clone(req)); result.retcode = env.stopReject ? 'FAIL' : 'TRADE_RETCODE_DONE'; return !env.stopReject; },
+    OrderSend: (req, result) => {
+        env.stopRequests.push(clone(req)); result.retcode = env.stopReject ? 'FAIL' : 'TRADE_RETCODE_DONE';
+        if (env.applyStops && !env.stopReject) {
+            const pos = [...env.positions.values()].find(p => p.ticket === req.position);
+            assert.ok(pos, 'the simulated server only modifies an existing child ticket');
+            pos.POSITION_SL = req.sl; pos.POSITION_TP = req.tp;
+        }
+        return !env.stopReject;
+    },
     RMRequestClose: (id, percent, magic, error, direction) => {
         env.requests.push({ id, percent, magic, direction });
         if (env.reject) { error.value = 'wait'; return false; }
@@ -157,6 +165,24 @@ function finishRequest() {
     pos.POSITION_VOLUME = Number((pos.POSITION_VOLUME * (1 - req.percent / 100)).toFixed(8));
     if (pos.POSITION_VOLUME <= 0) env.positions.delete(req.id);
     env.busy.delete(req.id);
+}
+// A second EA instance has independent compiled functions but shares the broker
+// and parent journal boundaries. Each turn reloads the journal, just as the
+// production RBManageGroups does after acquiring the exclusive parent lock.
+function secondManagerInstance() {
+    const instance = vm.createContext({ ...context });
+    for (const name of ['RRTargetPrice', 'RRTargetReached', 'RRBETarget', 'RRSLProtectsBE']) vm.runInContext(extract(name, core), instance);
+    for (const name of ['RRPlanTotalPercent', 'RRPlanClosesAll', 'RRPlanValidate']) vm.runInContext(extract(name, plans), instance);
+    vm.runInContext(extract('RRStateClosesAll', ordinary), instance);
+    for (const name of ['RBClosedGoal', 'RBManualTarget', 'RBPickClose', 'RBReductionPossible', 'RBSelectSafeChild', 'RBGroupVolumes',
+        'RBGroupCloseBusy', 'RBGroupGuardLatched', 'RBGroupNet', 'RBApplyGroupPlanLocked', 'RBRegisterGroupClose',
+        'RBUpdateGroupStops', 'RBManageGroupRisk', 'RBManageGroupLocked']) vm.runInContext(extract(name), instance);
+    return instance;
+}
+function sharedParentTurn(instance) {
+    const loaded = clone(env.saved);
+    instance.RBManageGroupLocked(1, loaded);
+    return loaded;
 }
 let passed = 0;
 function check(name, fn) { fn(); passed++; console.log('PASS ' + name); }
@@ -339,6 +365,71 @@ check('legacy TP removal retries after rejection and never reinstalls a server t
     assert.equal(env.stopRequests.length, 2); assert.ok(env.stopRequests.every(r => r.tp === 0 && r.sl === 90));
     env.positions.get(1).POSITION_TP = 0; env.time += 3; context.RBUpdateGroupStops(1, g);
     assert.equal(env.stopRequests.length, 2); assert.equal(env.requests.length, 0);
+});
+check('two current instances share durable parent stages without installing TP or duplicating child exits', () => {
+    const g = reset([3, 3, 3, 3]); env.canTrade = true; env.applyStops = true;
+    env.saved = clone(g);
+    const second = secondManagerInstance(), instances = [context, second];
+    let turn = 0;
+    const poll = () => {
+        env.time += 3;
+        const result = sharedParentTurn(instances[turn++ % 2]);
+        assert.ok([...env.positions.values()].every(p => p.POSITION_TP === 0));
+        assert.ok(env.stopRequests.every(r => r.tp === 0));
+        return result;
+    };
+    for (let i = 0; i < 4; i++) poll();
+    assert.equal(env.requests.length, 0); assert.equal(env.stopRequests.length, 0);
+    env.tick = { bid: 120, ask: 120.01 };
+    poll(); assert.equal(env.saved.exit_state.stage, 1); assert.equal(env.requests.length, 1);
+    poll(); assert.equal(env.requests.length, 1, 'the other chart waits for the same pending child');
+    finishRequest(); poll(); assert.equal(env.requests.length, 2);
+    poll(); assert.equal(env.requests.length, 2);
+    finishRequest();
+    for (let i = 0; i < 4; i++) poll();
+    assert.equal(env.requests.length, 2);
+    assert.equal([...env.positions.values()].reduce((sum, p) => sum + p.POSITION_VOLUME, 0), 6);
+    assert.ok([...env.positions.values()].every(p => p.POSITION_SL === 100));
+    env.tick = { bid: 150, ask: 150.01 };
+    poll(); assert.equal(env.saved.exit_state.stage, 2); assert.equal(env.requests.length, 3);
+    poll(); assert.equal(env.requests.length, 3);
+    finishRequest(); poll(); assert.equal(env.requests.length, 4);
+    poll(); assert.equal(env.requests.length, 4);
+    finishRequest(); poll(); poll();
+    assert.equal(env.positions.size, 0);
+    assert.deepEqual(env.requests.map(r => [r.id, r.percent]), [[1, 100], [2, 100], [3, 100], [4, 100]]);
+});
+check('an external writer can reintroduce final TP but current shared managers clear it without weakening SL or BE', () => {
+    for (const direction of [1, -1]) {
+        const g = reset([1, 1]); env.canTrade = true; env.applyStops = true;
+        g.direction = direction; g.exit_state.direction = direction;
+        g.exit_state.target_percent = [0, 100];
+        const type = direction === 1 ? 'POSITION_TYPE_BUY' : 'POSITION_TYPE_SELL';
+        const initialSL = direction === 1 ? 90 : 110;
+        for (const p of env.positions.values()) Object.assign(p, { POSITION_TYPE: type, POSITION_SL: initialSL });
+        env.saved = clone(g); const second = secondManagerInstance();
+        const finalTP = direction === 1 ? 150 : 50;
+        for (const p of env.positions.values()) p.POSITION_TP = finalTP;
+        sharedParentTurn(context);
+        assert.ok([...env.positions.values()].every(p => p.POSITION_TP === 0 && p.POSITION_SL === initialSL));
+        assert.equal(env.requests.length, 0);
+        env.saved.exit_state.stage = 1; env.saved.exit_state.be_requested = 1; env.saved.exit_state.be_done = 1;
+        env.positions.get(1).POSITION_SL = 100;
+        env.positions.get(2).POSITION_SL = direction === 1 ? 105 : 95;
+        env.tick = direction === 1 ? { bid: 125, ask: 125.01 } : { bid: 74.99, ask: 75 };
+        for (const p of env.positions.values()) p.POSITION_TP = finalTP;
+        env.time += 1; sharedParentTurn(second);
+        assert.equal(env.stopRequests.length, 2, 'the shared stop throttle also covers a different chart');
+        assert.ok([...env.positions.values()].every(p => p.POSITION_TP === finalTP));
+        env.time += 2; sharedParentTurn(context);
+        assert.equal(env.stopRequests.length, 4);
+        assert.deepEqual([...env.positions.values()].map(p => [p.POSITION_SL, p.POSITION_TP]),
+            [[100, 0], [direction === 1 ? 105 : 95, 0]]);
+        for (let i = 0; i < 4; i++) { env.time += 3; sharedParentTurn(i % 2 ? context : second); }
+        assert.equal(env.stopRequests.length, 4, 'without another external write TP stays absent');
+        assert.equal(env.requests.length, 0); assert.equal(env.saved.exit_state.stage, 1);
+        assert.equal(env.saved.exit_state.be_requested, 1); assert.equal(env.saved.exit_state.be_done, 1);
+    }
 });
 check('buy final virtual TP waits for bid then closes every remaining child serially across reload', () => {
     let g = reset([3, 3, 3, 3]); env.canTrade = true;

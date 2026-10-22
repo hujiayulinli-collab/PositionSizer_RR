@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "1.803" // Public v1.8.3 in MT5's two-part version format.
-string    Version = "1.8.3";
+#property version   "1.804" // Public v1.8.4 in MT5's two-part version format.
+string    Version = "1.8.4";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -37,7 +37,6 @@ bool RMGuardExitReady(const ulong identifier, const double volume, const double 
 #include "RRManualExecution.mqh"
 #include "RRTargetDrag.mqh"
 #include "RRTargetLines.mqh"
-#include "RRTargetEditor.mqh"
 #include "RRPanelRecovery.mqh"
 #include "Position Sizer.mqh";
 #include "Position Sizer Trading.mqh";
@@ -221,7 +220,6 @@ bool DetectedColorMode;
 
 int OnInit()
 {
-    RRCloseTargetEditor();
     RRDeleteTargetLines();
     RGDeleteStatus();
     RRPanelInitSucceeded = false;
@@ -640,13 +638,12 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] v1.8.3 公开版面板初始化完成。分批仅用于市价单，挂单正常提交；分仓TP由EA到价市价执行，请保持联网与算法交易权限。");
+    Print("[PS RR] v1.8.4 公开版面板初始化完成。TP直接拖线保存，到价市价执行；请将全部运行图表统一升级，避免旧版回挂服务器TP。");
     return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
-    RRCloseTargetEditor();
     RRDeleteTargetLines();
     RGDeleteStatus();
     RRShutdown();
@@ -743,22 +740,6 @@ void OnChartEvent(const int id,
                   const double &dparam,
                   const string &sparam)
 {
-    // The TP editor owns its mouse/keyboard events before calculator hotkeys
-    // or panel controls can react. It never changes native trade-line settings.
-    if (RRPanelInitSucceeded && CheckPointer(ExtDialog) == POINTER_DYNAMIC)
-    {
-        string message;
-        ulong owner;
-        bool parent, saved;
-        if (RRHandleTargetEditorEvent(id, lparam, dparam, sparam, message, owner, parent, saved))
-        {
-            if (owner != 0) ExtDialog.NotifyRRTargetMoved(owner, parent, saved, message);
-            if (message != "") Print("[PS RR TP] ", message);
-            if (saved) RRRefreshViews(true);
-            ChartRedraw();
-            return;
-        }
-    }
     if ((id == CHARTEVENT_OBJECT_DRAG || id == CHARTEVENT_OBJECT_CHANGE)
         && StringFind(sparam, RRLinePrefix) == 0)
     {

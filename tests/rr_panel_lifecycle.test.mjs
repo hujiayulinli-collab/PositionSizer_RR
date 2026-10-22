@@ -301,7 +301,6 @@ function deinitFixture(initialized, hasPanel, layoutExists = true) {
         RRShutdown: () => events.push('rr-shutdown'), RBShutdown: () => events.push('batch-shutdown'), EventKillTimer: () => events.push('timer-stop'),
         RCCancelReverse: () => events.push('cancel-reverse-entry'),
         RCCaptureCommon: () => events.push('capture-common-settings'),
-        RRCloseTargetEditor: () => events.push('close-tp-editor'),
         RRDeleteTargetLines: () => events.push('clear-rr-targets'),
         RGDeleteStatus: () => events.push('clear-guard-status'),
         CheckPointer: value => value ? 'dynamic' : 'invalid',
@@ -328,12 +327,12 @@ function deinitFixture(initialized, hasPanel, layoutExists = true) {
 }
 check('actual init-failed deinit destroys only partial panel and never saves settings', () => {
     const f = deinitFixture(false, true); f.context.OnDeinit('REASON_INITFAILED');
-    assert.deepEqual(f.events, ['close-tp-editor', 'clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'batch-shutdown', 'cancel-reverse-entry', 'timer-stop', 'destroy-panel', 'delete-panel', 'delete-prefix:12345', 'redraw']);
+    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'batch-shutdown', 'cancel-reverse-entry', 'timer-stop', 'destroy-panel', 'delete-panel', 'delete-prefix:12345', 'redraw']);
     assert.equal(f.context.ExtDialog, null); assert.equal(f.context.RRPanelInitSucceeded, false);
 });
 check('failure before allocation deinitializes without dereferencing a null panel', () => {
     const f = deinitFixture(false, false); f.context.OnDeinit('REASON_INITFAILED');
-    assert.deepEqual(f.events, ['close-tp-editor', 'clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'batch-shutdown', 'cancel-reverse-entry', 'timer-stop', 'redraw']);
+    assert.deepEqual(f.events, ['clear-rr-targets', 'clear-guard-status', 'rr-shutdown', 'batch-shutdown', 'cancel-reverse-entry', 'timer-stop', 'redraw']);
 });
 check('unfinished init skips saving even with a different deinit reason', () => {
     const f = deinitFixture(false, true); f.context.OnDeinit('REASON_PARAMETERS');
@@ -350,7 +349,8 @@ check('successful chart change preserves panel object for reuse', () => {
     assert.ok(f.context.ExtDialog); assert.ok(!f.events.includes('destroy-panel'));
     assert.ok(!f.events.includes('save-settings')); assert.equal(f.context.OldSymbol, 'TEST');
     assert.ok(f.events.includes('capture-common-settings'));
-    assert.ok(f.events.indexOf('close-tp-editor') < f.events.indexOf('capture-common-settings'));
+    assert.ok(f.events.indexOf('clear-rr-targets') >= 0);
+    assert.ok(f.events.indexOf('clear-rr-targets') < f.events.indexOf('capture-common-settings'));
     assert.ok(f.events.indexOf('cancel-reverse-entry') < f.events.indexOf('capture-common-settings'));
 });
 check('failed initialization cannot capture half-loaded account common settings', () => {

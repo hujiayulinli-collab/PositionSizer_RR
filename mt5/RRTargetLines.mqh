@@ -33,6 +33,9 @@ string RRTargetCaption(const string owner, const int index, const double multipl
 void RRDeleteTargetLines()
 {
     ObjectsDeleteAll(ChartID(), RRLinePrefix);
+    // Remove the retired editor's objects when upgrading or unloading. No
+    // editor state or mouse/keyboard event interception remains in this EA.
+    ObjectsDeleteAll(ChartID(), "PSRR_Edit_");
     RRLastLineRefresh = 0;
     ArrayResize(RRLabelRows, 0);
     RRResetDragLines();
@@ -93,7 +96,7 @@ void RRDrawTarget(const string key, const double price, const string caption,
     ObjectSetInteger(chart, line, OBJPROP_ZORDER, RRTargetLinePriority(line));
     ObjectSetString(chart, line, OBJPROP_TEXT, caption);
     ObjectSetString(chart, line, OBJPROP_TOOLTIP, caption + (editable
-        ? "\nEA到价后市价执行，需终端联网并允许交易。双击选中后拖动，松开即保存；也可单击 [改价] 输入价格或图上选价。比例与 BE 不变。"
+        ? "\nEA到价后市价执行，需终端联网并允许交易。双击选中TP线后拖动，松开即保存；比例与 BE 不变。"
         : "\n此目标仅供查看（新仓预览、已触发目标或管理暂停时不可拖动）。"));
 
     string label = key + "_Label";
@@ -101,7 +104,7 @@ void RRDrawTarget(const string key, const double price, const string caption,
     int x = 0, y = 0;
     datetime time = iTime(_Symbol, _Period, 0);
     int height = (int)ChartGetInteger(chart, CHART_HEIGHT_IN_PIXELS, 0);
-    string visible_caption = caption + (editable ? "  [改价]" : "");
+    string visible_caption = caption;
     bool located = time > 0 && ChartTimePriceToXY(chart, 0, time, price, x, y);
     if (!located)
     {
@@ -110,8 +113,7 @@ void RRDrawTarget(const string key, const double price, const string caption,
     }
     if (y < 26) { y = 26; visible_caption = "↑ 图外 | " + visible_caption; }
     else if (y > height - 20) { y = height - 20; visible_caption = "↓ 图外 | " + visible_caption; }
-    // Leave a clear vertical gap above native SL/TP hit regions. Clicking the
-    // caption opens an independent editor instead of double-clicking the line.
+    // Keep descriptions clear of their target lines; only the line is editable.
     y = RRPlaceTargetLabel(y - 12, height);
     ObjectSetInteger(chart, label, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
     ObjectSetInteger(chart, label, OBJPROP_ANCHOR, ANCHOR_RIGHT_LOWER);
@@ -122,11 +124,11 @@ void RRDrawTarget(const string key, const double price, const string caption,
     ObjectSetInteger(chart, label, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(chart, label, OBJPROP_HIDDEN, true);
     ObjectSetInteger(chart, label, OBJPROP_BACK, false);
-    ObjectSetInteger(chart, label, OBJPROP_ZORDER, editable ? 100 + RRTargetLinePriority(line) : 0);
+    ObjectSetInteger(chart, label, OBJPROP_ZORDER, 0);
     ObjectSetString(chart, label, OBJPROP_FONT, "Microsoft YaHei");
     ObjectSetString(chart, label, OBJPROP_TEXT, visible_caption);
     ObjectSetString(chart, label, OBJPROP_TOOLTIP, caption + (editable
-        ? "\n单击 [改价] 标签：输入精确价格，或图上选价后保存；不修改比例或 BE。" : ""));
+        ? "\n双击选中TP线后拖动，松开即保存；不修改比例或 BE。" : ""));
 }
 
 void RRPruneTargetRows(const string owner_prefix, const int count)

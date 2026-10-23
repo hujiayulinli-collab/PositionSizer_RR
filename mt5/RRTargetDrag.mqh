@@ -27,6 +27,9 @@ bool RRDragFocusedParent = false;
 
 void RRFocusTargetLines(const ulong owner, const bool parent)
 {
+    // New/recreated target lines get the current priority in RRDrawTarget.
+    // An unchanged selection must not synchronously probe every saved line.
+    if (RRDragFocusedOwner == owner && RRDragFocusedParent == parent) return;
     RRDragFocusedOwner = owner;
     RRDragFocusedParent = parent;
     // Selection can change between ticks. Update click priority immediately,

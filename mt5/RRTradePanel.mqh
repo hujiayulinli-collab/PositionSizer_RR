@@ -5,7 +5,7 @@ bool CPositionSizeCalculator::ComboBoxCreate(CPanelList *list, CRRPanelComboBox 
     if (!combo.Create(m_chart_id, m_name + name, m_subwin, x1, y1, x2, y2)) return false;
     if (!Add(combo)) return false;
     list.CreateListElementByName(combo, name);
-    ObjectSetInteger(m_chart_id, m_name + name + "Edit", OBJPROP_FONTSIZE, 9);
+    ObjectSetInteger(m_chart_id, m_name + name + "Edit", OBJPROP_FONTSIZE, RRPanelScaleFont(9));
     return true;
 }
 
@@ -20,20 +20,20 @@ bool CPositionSizeCalculator::CreateTradeControlOptions()
     int page_y = (int)MathRound(42 * m_DPIScale);
     if (!ButtonCreate(TradingTabList, m_BtnTradeRegularPage, x, page_y, x + (int)MathRound(151 * m_DPIScale), page_y + h, "m_BtnTradeRegularPage", "常规交易")) return false;
     if (!ButtonCreate(TradingTabList, m_BtnTradeBatchPage, x + (int)MathRound(160 * m_DPIScale), page_y, right, page_y + h, "m_BtnTradeBatchPage", "分批开仓")) return false;
-    m_BtnTradeRegularPage.FontSize(9); m_BtnTradeBatchPage.FontSize(9);
+    m_BtnTradeRegularPage.FontSize(RRPanelScaleFont(9)); m_BtnTradeBatchPage.FontSize(RRPanelScaleFont(9));
     int y = m_ChkAskForConfirmation.Top() - ClientAreaTop() + (int)MathRound(24 * m_DPIScale);
     if (!CheckBoxCreate(TradingTabList, m_ChkCloseOpposite, x, y, right, y + h, "m_ChkCloseOpposite", "反向开仓先平同品种全部反向仓", "包含手动单和其他 EA；确认全部平完后才继续新开仓")) return false;
     m_ChkCloseOpposite.Checked(RCCloseOpposite);
-    ObjectSetInteger(m_chart_id, m_name + "m_ChkCloseOppositeLabel", OBJPROP_FONTSIZE, 9);
+    ObjectSetInteger(m_chart_id, m_name + "m_ChkCloseOppositeLabel", OBJPROP_FONTSIZE, RRPanelScaleFont(9));
     y += (int)MathRound(24 * m_DPIScale);
     if (!LabelCreate(TradingTabList, m_LblReverseStatus, x, y, x + (int)MathRound(215 * m_DPIScale), y + h, "m_LblReverseStatus", "")) return false;
     if (!ButtonCreate(TradingTabList, m_BtnCancelReverse, x + (int)MathRound(220 * m_DPIScale), y, right, y + h, "m_BtnCancelReverse", "取消后续开仓")) return false;
-    m_LblReverseStatus.FontSize(9);
-    m_BtnCancelReverse.FontSize(9);
+    m_LblReverseStatus.FontSize(RRPanelScaleFont(9));
+    m_BtnCancelReverse.FontSize(RRPanelScaleFont(9));
     y += (int)MathRound(24 * m_DPIScale);
     if (!CheckBoxCreate(TradingTabList, m_ChkBatchEnabled, x, y, right, y + h, "m_ChkBatchEnabled", "启用父订单分批开仓（市价 / 对冲）", "仅市价分批；挂单正常提交、不拆子单。统一子单上限；保存后生效，不修改正在执行的父订单")) return false;
     m_ChkBatchEnabled.Checked(RBEnabled);
-    ObjectSetInteger(m_chart_id, m_name + "m_ChkBatchEnabledLabel", OBJPROP_FONTSIZE, 9);
+    ObjectSetInteger(m_chart_id, m_name + "m_ChkBatchEnabledLabel", OBJPROP_FONTSIZE, RRPanelScaleFont(9));
     y += (int)MathRound(24 * m_DPIScale);
     if (!LabelCreate(TradingTabList, m_LblBatchLots, x, y, x + (int)MathRound(80 * m_DPIScale), y + h, "m_LblBatchLots", "子单上限(手)")) return false;
     if (!EditCreate(TradingTabList, m_EdtBatchLots, x + (int)MathRound(84 * m_DPIScale), y, x + (int)MathRound(140 * m_DPIScale), y + h, "m_EdtBatchLots", DoubleToString(RBChildMaxLots, CountDecimalPlaces(RBChildMaxLots)))) return false;
@@ -52,9 +52,9 @@ bool CPositionSizeCalculator::CreateTradeControlOptions()
     if (!LabelCreate(TradingTabList, m_LblBatchStatus2, x, y, right, y + h, "m_LblBatchStatus2", "")) return false;
     y += (int)MathRound(24 * m_DPIScale);
     if (!LabelCreate(TradingTabList, m_LblBatchStatus3, x, y, right, y + h, "m_LblBatchStatus3", "")) return false;
-    m_LblBatchLots.FontSize(9); m_LblBatchInterval.FontSize(9); m_LblBatchDeviation.FontSize(9);
-    m_BtnBatchSave.FontSize(9); m_BtnBatchCancel.FontSize(9);
-    m_LblBatchStatus.FontSize(9); m_LblBatchStatus2.FontSize(9); m_LblBatchStatus3.FontSize(9);
+    m_LblBatchLots.FontSize(RRPanelScaleFont(9)); m_LblBatchInterval.FontSize(RRPanelScaleFont(9)); m_LblBatchDeviation.FontSize(RRPanelScaleFont(9));
+    m_BtnBatchSave.FontSize(RRPanelScaleFont(9)); m_BtnBatchCancel.FontSize(RRPanelScaleFont(9));
+    m_LblBatchStatus.FontSize(RRPanelScaleFont(9)); m_LblBatchStatus2.FontSize(RRPanelScaleFont(9)); m_LblBatchStatus3.FontSize(RRPanelScaleFont(9));
     RefreshBatchStatus();
     return true;
 }
@@ -95,7 +95,7 @@ void CPositionSizeCalculator::LayoutTradingSubpage()
 {
     if (!m_controls_ready) return;
     int row = (int)MathRound(24 * m_DPIScale);
-    int top = ClientAreaTop() + (int)MathRound(42 * m_DPIScale);
+    int top = ClientAreaTop() + (int)MathRound(68 * m_DPIScale);
     m_BtnTradeRegularPage.Move(m_BtnTradeRegularPage.Left(), top);
     m_BtnTradeBatchPage.Move(m_BtnTradeBatchPage.Left(), top);
     m_BtnTrade.Move(m_BtnTrade.Left(), top + row);

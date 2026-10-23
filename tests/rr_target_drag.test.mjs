@@ -136,6 +136,17 @@ check('overlapping lines prioritize selected position and distinguish parent wit
  assert.equal(c.objects.get(name).OBJPROP_ZORDER,10);assert.equal(c.objects.get(group).OBJPROP_ZORDER,20);
  assert.equal(c.objects.get(name).OBJPROP_HIDDEN,false);assert.equal(c.objects.get(group).OBJPROP_BACK,false);
 });
+check('unchanged selected owner performs no native reads or writes, including after line creation',()=>{
+ const c=fixture(),name=c.remember();c.RRFocusTargetLines(42,false);
+ const find=c.ObjectFind,write=c.ObjectSetInteger;
+ c.ObjectFind=()=>{throw Error('unchanged focus must not synchronously probe lines');};
+ c.ObjectSetInteger=()=>{throw Error('unchanged focus must not rewrite lines');};
+ for(let i=0;i<1000;i++)c.RRFocusTargetLines(42,false);
+ c.ObjectFind=find;c.ObjectSetInteger=write;
+ const second=c.remember(1);assert.equal(c.objects.get(second).OBJPROP_ZORDER,20);
+ c.objects.delete(name);c.RRPruneDragLines();const recreated=c.remember();
+ assert.equal(c.objects.get(recreated).OBJPROP_ZORDER,20);
+});
 check('selection or color-only property changes do not persist a new plan',()=>{
  const c=fixture(),name=c.remember();c.objects.get(name).OBJPROP_SELECTED=true;c.remember();
  const r=c.drop(name,106);assert.equal(r.owner,0);assert.equal(r.saved,false);assert.equal(r.message,'');assert.equal(c.calls.length,0);

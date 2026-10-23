@@ -15,8 +15,11 @@ function extract(name) {
         if (source[end] === '{') depth++;
         if (source[end] === '}') depth--;
     }
-    const args = match[1].split(',').filter(Boolean).map(s => s.trim().split(/\s+/).at(-1).replace('&', ''));
+    const args = match[1].split(',').filter(Boolean).map(s => s.trim().split(/\s+/).at(-1).replace(/[&*]/g, ''));
     let body = source.slice(start, end - 1)
+        .replace(/\bCWnd(?:Obj|Container)?\s*\*(\w+)/g, 'let $1')
+        .replace(/dynamic_cast<(CWndObj|CWndContainer|CEdit|CBmpButton) \*>\((\w+)\)/g, 'priorityCast($2, "$1")')
+        .replaceAll('GetPointer(this)', 'panelRoot').replaceAll('GetPointer(m_OutsideTradeButton)', 'm_OutsideTradeButton')
         .replace(/\bulong groups\[\];/g, 'let groups = [];')
         .replace(/\bstring group_labels\[\];/g, 'let group_labels = [];')
         .replace(/\b(?:double|string)\s+((?:\w+,\s*)+\w+);/g, 'let $1;')
@@ -86,9 +89,9 @@ function fixture(count = 2) {
         RRActivePlan: active, RR_MAX_TARGETS: 20, RR_Enable: true,
         RRFocusTargetLines: () => {}, panelName: 'PS_123_', Name: () => s.panelName, m_chart_id: 77, OBJPROP_ZORDER: 'zorder',
         chartObjects: new Map(), zorderWrites: [], StringLen: text => text.length, StringFind: (text, part) => text.indexOf(part),
-        ObjectsTotal: chart => { assert.equal(chart, 77); return s.chartObjects.size; },
-        ObjectName: (chart, index) => { assert.equal(chart, 77); return [...s.chartObjects.keys()][index]; },
-        ObjectGetInteger: (chart, name, property) => { assert.equal(chart, 77); assert.equal(property, 'zorder'); return s.chartObjects.get(name); },
+        ObjectsTotal: () => { throw new Error('priority update must not enumerate chart objects'); },
+        ObjectName: () => { throw new Error('priority update must not enumerate chart objects'); },
+        ObjectGetInteger: () => { throw new Error('priority update must not synchronously read native objects'); },
         ObjectSetInteger: (chart, name, property, priority) => { assert.equal(chart, 77); assert.equal(property, 'zorder'); s.chartObjects.set(name, priority); s.zorderWrites.push({name, priority}); return true; },
         m_rr_count: 0, m_rr_page: 0, m_rr_visible: true, m_minimized: false,
         m_rr_has_plan: true, m_rr_position_magic: 123, m_rr_position_symbol: 'AUDUSD', m_rr_position_choices: '',
@@ -113,6 +116,7 @@ function fixture(count = 2) {
         clrDimGray: 'grey', clrDarkSlateGray: 'normal', clrFireBrick: 'error', tick: 1000, GetTickCount64: () => s.tick,
         groups: new Map(), groupReadable: true, groupApplyCalls: [], groupCloseCalls: [], positions: new Map(), readable: true, positionApplyCalls: [], positionApplyAllowed: true,
         first_column_start: 7, element_height: 20, m_DPIScale: 1, MathRound: Math.round, ALIGN_RIGHT: 1, RRTabList: [],
+        RRPanelScaleFont: points => Math.max(6, Math.round(points * s.m_DPIScale)),
     };
     for (const name of ['m_LblRRNumber', 'm_LblRRPrice', 'm_EdtRRMultiple', 'm_EdtRRPercent', 'm_ChkRRBreakEven', 'm_BtnRRDelete'])
         s[name] = Array.from({ length: 5 }, () => new Control());
@@ -121,6 +125,29 @@ function fixture(count = 2) {
     for (const type of ['Label', 'Button', 'Edit', 'CheckBox', 'ComboBox']) s[type + 'Create'] = (list, control, x1, y1, x2, y2, name, text) => {
         control.rect = [x1, y1, x2, y2]; control.name = name; if (text !== undefined) control.Text(text); list.push(control); return true;
     };
+    s.NULL = null;
+    s.priorityCast = (control, kind) => {
+        if (!control) return null;
+        if (kind === 'CWndContainer') return control.children ? control : null;
+        if (kind === 'CWndObj') return control.ZOrder ? control : null;
+        return control.kind === kind ? control : null;
+    };
+    s.container = (name, children = []) => ({Name: () => name, children, ControlsTotal: () => children.length, Control: i => children[i]});
+    s.panelRoot = s.container('PS_123_');
+    s.RRScaleFindControl = (root, name) => {
+        if (!root) return null; if (root.Name() === name) return root;
+        for (const child of root.children || []) { const found = s.RRScaleFindControl(child, name); if (found) return found; }
+        return null;
+    };
+    s.addChartControl = (name, priority = 0, kind = 'CButton', parent = s.panelRoot) => {
+        const control = {kind, priority, Name: () => name, ZOrder(value) {
+            if (!arguments.length) return this.priority;
+            this.priority = value;
+            return kind === 'CEdit' || kind === 'CBmpButton' ? s.ObjectSetInteger(77, name, 'zorder', value) : true;
+        }};
+        s.chartObjects.set(name, priority); if (parent) parent.children.push(control); return control;
+    };
+    s.m_OutsideTradeButton = {Name: () => ''};
     s.m_CmbRRPosition = new Combo();
     s.PositionsTotal = () => s.positions.size;
     s.PositionGetTicket = index => { s.selected = [...s.positions.values()][index]; return s.selected?.ticket || 0; };
@@ -179,7 +206,7 @@ function fixture(count = 2) {
     s.RefreshValues = () => s.updates.push(['refresh']);
     s.SaveSettingsOnDisk = symbol => s.updates.push(['settings', symbol]);
     const context = vm.createContext(s);
-    for (const name of ['CreateRRControls', 'LoadRRDraft', 'FillRRDraft', 'ReadRRDraftMultiple', 'NotifyRRTargetMoved', 'FocusRRTargetLines', 'RaiseRRPanelPriority', 'LoadRRPositionDraft', 'LoadRRGroupDraft', 'RefreshRRGroupStatus', 'UpdateRRModeLabels', 'CaptureRRPage', 'RenderRRPage', 'OnClickBtnRRAdd', 'OnClickBtnRRDelete',
+    for (const name of ['CreateRRControls', 'LoadRRDraft', 'FillRRDraft', 'ReadRRDraftMultiple', 'NotifyRRTargetMoved', 'FocusRRTargetLines', 'RaiseRRPanelPriority', 'RaiseRRControlPriority', 'RefreshRRPanelObjectPriority', 'LoadRRPositionDraft', 'LoadRRGroupDraft', 'RefreshRRGroupStatus', 'UpdateRRModeLabels', 'CaptureRRPage', 'RenderRRPage', 'OnClickBtnRRAdd', 'OnClickBtnRRDelete',
                          'RefreshRRTargetPrices', 'RefreshRRPlanSummary', 'RefreshRRLiveStatus', 'OnClickBtnRRNewPlan', 'OnClickBtnRRPosition',
                          'OnClickBtnRRPrevious', 'OnClickBtnRRNext', 'OnClickBtnRRReset', 'OnClickBtnRRSave', 'SelectRRPanelPosition',
                          'RefreshRRPositionChoices', 'OnChangeRRPosition', 'OnClickRRManualClose', 'RefreshRRManualAction'])
@@ -510,7 +537,7 @@ check('refresh and dropdown reconstruction do not rewrite a custom manual percen
     assert.equal(s.m_EdtRRClosePercent.Text(), '37.25'); assert.equal(s.m_CmbRRPosition.Value(), 42);
 });
 check('actual RR control creation keeps manual actions and all five targets inside the panel', () => {
-    for (const scale of [1, 1.25, 1.5, 2]) {
+    for (const scale of [0.75, 1, 1.25, 1.5, 1.75, 2]) {
         const s = fixture(); s.m_DPIScale = scale; s.first_column_start = Math.round(7 * scale); s.element_height = Math.round(20 * scale);
         assert.equal(s.CreateRRControls(), true);
         const right = s.first_column_start + Math.round(307 * scale);
@@ -757,50 +784,43 @@ check('selection immediately focuses the selected position or parent and clears 
     assert.deepEqual(calls, [{ owner: 42, parent: false }, { owner: 42, parent: true }, { owner: 0, parent: false }]);
 });
 
-check('panel priorities stay above draggable lines while preserving the native control hierarchy', () => {
-    const s = fixture(); s.chartObjects = new Map([
-        ['PS_123_Back', 0], ['PS_123_Edit', 3], ['PS_123_ComboList', 41],
-        ['PSRR_Targets_42_0', 20], ['PS_999_Back', 0], ['foreign_PS_123_Button', 5],
-    ]);
+check('panel priorities use cached control state and leave unrelated chart objects untouched', () => {
+    const s = fixture(); s.addChartControl('PS_123_Back'); s.addChartControl('PS_123_Edit', 3, 'CEdit');
+    const nested = s.container('PS_123_Combo'); s.panelRoot.children.push(nested);
+    s.addChartControl('PS_123_ComboList', 41, 'CPanel', nested);
+    for (let i = 0; i < 10000; i++) s.chartObjects.set('Unrelated_' + i, 5);
+    s.chartObjects.set('PSRR_Targets_42_0', 20);
     s.FocusRRTargetLines();
     assert.equal(s.chartObjects.get('PS_123_Back'), 1000000);
-    assert.equal(s.chartObjects.get('PS_123_Edit') - s.chartObjects.get('PS_123_Back'), 3);
-    assert.equal(s.chartObjects.get('PS_123_ComboList') - s.chartObjects.get('PS_123_Back'), 41);
-    assert.equal(s.chartObjects.get('PSRR_Targets_42_0'), 20); assert.equal(s.chartObjects.get('PS_999_Back'), 0);
-    assert.equal(s.chartObjects.get('foreign_PS_123_Button'), 5); assert.equal(s.zorderWrites.length, 3);
+    assert.equal(s.chartObjects.get('PS_123_Edit'), 1000003);
+    assert.equal(s.chartObjects.get('PS_123_ComboList'), 1000041);
+    assert.equal(s.chartObjects.get('PSRR_Targets_42_0'), 20); assert.equal(s.chartObjects.get('Unrelated_1'), 5);
+    assert.equal(s.zorderWrites.length, 3, 'each native control is written once, including edit');
 });
-check('repeated panel priority refresh is stable and raises newly created controls without incrementing old ones', () => {
-    const s = fixture(); s.chartObjects.set('PS_123_Edit', 3); s.FocusRRTargetLines();
-    const first = s.chartObjects.get('PS_123_Edit'); s.FocusRRTargetLines(); s.FocusRRTargetLines();
-    assert.equal(s.chartObjects.get('PS_123_Edit'), first); assert.equal(s.zorderWrites.length, 1);
-    s.chartObjects.set('PS_123_NewEdit', 3); s.chartObjects.set('PS_123_NewButton', 0); s.FocusRRTargetLines();
-    assert.equal(s.chartObjects.get('PS_123_NewEdit'), first); assert.equal(s.chartObjects.get('PS_123_NewButton'), first - 3);
+check('repeated events perform no native priority reads or writes and newly created controls are discovered', () => {
+    const s = fixture(), edit = s.addChartControl('PS_123_Edit', 3, 'CEdit'); s.FocusRRTargetLines();
+    for (let i = 0; i < 1000; i++) s.FocusRRTargetLines();
+    assert.equal(s.zorderWrites.length, 1);
+    s.addChartControl('PS_123_NewEdit', 3, 'CEdit'); s.addChartControl('PS_123_NewButton', 0); s.FocusRRTargetLines();
+    assert.equal(s.chartObjects.get('PS_123_NewEdit'), 1000003); assert.equal(s.chartObjects.get('PS_123_NewButton'), 1000000);
     assert.equal(s.zorderWrites.length, 3);
-    s.chartObjects.set('PS_123_Edit', 3); s.FocusRRTargetLines(); assert.equal(s.chartObjects.get('PS_123_Edit'), first);
+    edit.ZOrder(7); s.FocusRRTargetLines(); assert.equal(s.chartObjects.get('PS_123_Edit'), 1000007);
 });
 check('expanded holding chooser puts its entire subtree above covered panel controls', () => {
-    const s = fixture(); s.chartObjects = new Map([
-        ['PS_123_m_CmbRRPositionEdit', 3], ['PS_123_m_CmbRRPositionDrop', 4],
-        ['PS_123_m_CmbRRPositionList', 0], ['PS_123_m_CmbRRPositionListItem1', 7],
-        ['PS_123_m_CmbRRPositionListScrollInc', 12], ['PS_123_m_BtnRRManualClose', 80],
-        ['PS_123_m_EdtRRClosePercent', 81], ['PS_999_m_CmbRRPositionListItem1', 7],
-        ['PSRR_Targets_42_0', 20],
-    ]);
+    const s = fixture(); const list = s.container('PS_123_m_CmbRRPosition'); s.panelRoot.children.push(list);
+    for (const [suffix, relative, kind] of [['Edit', 3, 'CEdit'], ['Drop', 4, 'CBmpButton'], ['List', 0, 'CPanel'], ['ListItem1', 7, 'CEdit'], ['ListScrollInc', 12, 'CBmpButton']])
+        s.addChartControl('PS_123_m_CmbRRPosition' + suffix, relative, kind, list);
+    s.addChartControl('PS_123_m_BtnRRManualClose', 80); s.addChartControl('PS_123_m_EdtRRClosePercent', 81, 'CEdit');
     s.m_CmbRRPosition.OpenDropDown(); s.FocusRRTargetLines();
     for (const [suffix, relative] of [['Edit', 3], ['Drop', 4], ['List', 0], ['ListItem1', 7], ['ListScrollInc', 12]]) {
         const priority = s.chartObjects.get('PS_123_m_CmbRRPosition' + suffix);
-        assert.equal(priority, 2000000 + relative);
-        assert.ok(priority > s.chartObjects.get('PS_123_m_BtnRRManualClose'));
-        assert.ok(priority > s.chartObjects.get('PS_123_m_EdtRRClosePercent'));
+        assert.equal(priority, 2000000 + relative); assert.ok(priority > s.chartObjects.get('PS_123_m_BtnRRManualClose'));
     }
-    assert.equal(s.chartObjects.get('PS_999_m_CmbRRPositionListItem1'), 7);
-    assert.equal(s.chartObjects.get('PSRR_Targets_42_0'), 20);
+    assert.equal(s.zorderWrites.length, 7, 'edit/bitmap native setters are not written twice');
 });
-check('closing and reopening a holding chooser restores normal priority without losing native relative order', () => {
-    const s = fixture(); s.chartObjects = new Map([
-        ['PS_123_m_CmbRRPositionEdit', 3], ['PS_123_m_CmbRRPositionListItem1', 27],
-        ['PS_123_m_BtnRRManualClose', 80],
-    ]);
+check('closing and reopening a holding chooser restores priority without accumulating bands', () => {
+    const s = fixture(); s.addChartControl('PS_123_m_CmbRRPositionEdit', 3, 'CEdit');
+    s.addChartControl('PS_123_m_CmbRRPositionListItem1', 27, 'CEdit'); s.addChartControl('PS_123_m_BtnRRManualClose', 80);
     for (let i = 0; i < 3; i++) {
         s.m_CmbRRPosition.OpenDropDown(); s.FocusRRTargetLines();
         assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionEdit'), 2000003);
@@ -811,23 +831,36 @@ check('closing and reopening a holding chooser restores normal priority without 
         assert.equal(s.chartObjects.get('PS_123_m_BtnRRManualClose'), 1000080);
     }
 });
-check('an open chooser reasserts popup priority after native resets and includes newly created list rows', () => {
-    const s = fixture(); s.chartObjects.set('PS_123_m_CmbRRPositionListItem1', 7);
-    s.m_CmbRRPosition.OpenDropDown(); s.FocusRRTargetLines();
-    const writes = s.zorderWrites.length; s.FocusRRTargetLines();
-    assert.equal(s.zorderWrites.length, writes, 'unchanged priorities do not rewrite chart objects');
-    s.chartObjects.set('PS_123_m_CmbRRPositionListItem1', 9);
-    s.chartObjects.set('PS_123_m_CmbRRPositionListItem2', 10);
-    s.FocusRRTargetLines();
+check('open chooser reasserts popup priority after native-control resets and includes new list rows', () => {
+    const s = fixture(), item = s.addChartControl('PS_123_m_CmbRRPositionListItem1', 7, 'CEdit');
+    s.m_CmbRRPosition.OpenDropDown(); s.FocusRRTargetLines(); const writes = s.zorderWrites.length; s.FocusRRTargetLines();
+    assert.equal(s.zorderWrites.length, writes);
+    item.ZOrder(9); s.addChartControl('PS_123_m_CmbRRPositionListItem2', 10, 'CEdit'); s.FocusRRTargetLines();
     assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionListItem1'), 2000009);
     assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionListItem2'), 2000010);
     s.m_CmbRRPosition.CloseDropDown(); s.FocusRRTargetLines();
     assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionListItem1'), 1000009);
-    assert.equal(s.chartObjects.get('PS_123_m_CmbRRPositionListItem2'), 1000010);
+});
+check('optional outside trade button retains panel priority even though it is not in the control tree', () => {
+    const s = fixture(); s.m_OutsideTradeButton = s.addChartControl('PS_123_OutsideTrade', 2, 'CButton', null);
+    s.FocusRRTargetLines(); assert.equal(s.chartObjects.get('PS_123_OutsideTrade'), 1000002); assert.equal(s.zorderWrites.length, 1);
+});
+check('failed native priority write retries on the next refresh', () => {
+    const s = fixture(); const item = s.addChartControl('PS_123_Back', 3); const write = s.ObjectSetInteger;
+    s.ObjectSetInteger = () => false; s.FocusRRTargetLines(); assert.equal(item.ZOrder(), 3);
+    s.ObjectSetInteger = write; s.FocusRRTargetLines(); assert.equal(item.ZOrder(), 1000003);
+    assert.equal(s.chartObjects.get('PS_123_Back'), 1000003);
+});
+check('targeted object recreation restores cached priority without querying or rewriting other controls', () => {
+    const s = fixture(); s.addChartControl('PS_123_Edit', 3, 'CEdit'); s.addChartControl('PS_123_Back', 0); s.FocusRRTargetLines();
+    s.chartObjects.set('PS_123_Edit', 0); const count = s.zorderWrites.length;
+    s.RefreshRRPanelObjectPriority('PS_123_Edit'); assert.equal(s.chartObjects.get('PS_123_Edit'), 1000003);
+    assert.equal(s.zorderWrites.length, count + 1);
+    s.RefreshRRPanelObjectPriority('PS_old_Edit'); s.RefreshRRPanelObjectPriority('PS_123_missing');
+    assert.equal(s.zorderWrites.length, count + 1);
 });
 check('uncreated panel with an empty prefix never changes chart objects', () => {
-    const s = fixture(); s.panelName = ''; s.chartObjects.set('PSRR_Targets_42_0', 20); s.chartObjects.set('OtherPanel', 0);
-    s.FocusRRTargetLines(); assert.equal(s.zorderWrites.length, 0);
+    const s = fixture(); s.panelName = ''; s.addChartControl('PS_123_Edit'); s.FocusRRTargetLines(); assert.equal(s.zorderWrites.length, 0);
 });
 
 check('full-exit single and parent plans with zero TP show EA execution rather than missing protection', () => {

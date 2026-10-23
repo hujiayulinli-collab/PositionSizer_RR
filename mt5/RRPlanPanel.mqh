@@ -10,8 +10,8 @@ bool CPositionSizeCalculator::CreateRRControls()
     y += (int)MathRound(22 * m_DPIScale);
     if (!ButtonCreate(RRTabList, m_BtnRRNewPlan, x, y, x + (int)MathRound(112 * m_DPIScale), y + h, "m_BtnRRNewPlan", "新仓方案")) return false;
     if (!ButtonCreate(RRTabList, m_BtnRRPosition, x + (int)MathRound(120 * m_DPIScale), y, right, y + h, "m_BtnRRPosition", "刷新持仓列表")) return false;
-    m_BtnRRNewPlan.FontSize(9);
-    m_BtnRRPosition.FontSize(9);
+    m_BtnRRNewPlan.FontSize(RRPanelScaleFont(9));
+    m_BtnRRPosition.FontSize(RRPanelScaleFont(9));
     y = (int)MathRound(87 * m_DPIScale);
     if (!ComboBoxCreate(RRTabList, m_CmbRRPosition, x, y, right, y + h, "m_CmbRRPosition")) return false;
     m_CmbRRPosition.AddItem("选择持仓（整个账户）", 0);
@@ -20,23 +20,23 @@ bool CPositionSizeCalculator::CreateRRControls()
     if (!LabelCreate(RRTabList, m_LblRRClosePercent, x, y, x + (int)MathRound(70 * m_DPIScale), y + h, "m_LblRRClosePercent", "平仓比例")) return false;
     if (!EditCreate(RRTabList, m_EdtRRClosePercent, x + (int)MathRound(76 * m_DPIScale), y, x + (int)MathRound(139 * m_DPIScale), y + h, "m_EdtRRClosePercent", "50", "输入当前余仓的平仓比例，例如 25 表示 25%")) return false;
     if (!LabelCreate(RRTabList, m_LblRRClosePercentUnit, x + (int)MathRound(145 * m_DPIScale), y, x + (int)MathRound(163 * m_DPIScale), y + h, "m_LblRRClosePercentUnit", "%")) return false;
-    m_LblRRClosePercent.FontSize(9);
-    m_LblRRClosePercentUnit.FontSize(9);
+    m_LblRRClosePercent.FontSize(RRPanelScaleFont(9));
+    m_LblRRClosePercentUnit.FontSize(RRPanelScaleFont(9));
     if (!ButtonCreate(RRTabList, m_BtnRRManualClose, x + (int)MathRound(170 * m_DPIScale), y, right, y + h, "m_BtnRRManualClose", "按比例平仓")) return false;
-    m_BtnRRManualClose.FontSize(9);
+    m_BtnRRManualClose.FontSize(RRPanelScaleFont(9));
     y += (int)MathRound(24 * m_DPIScale);
     if (!LabelCreate(RRTabList, m_LblRRManualInfo, x, y, right, y + h, "m_LblRRManualInfo", "手动平仓：按当前余仓；下方目标按初始仓位。")) return false;
-    m_LblRRManualInfo.FontSize(9);
+    m_LblRRManualInfo.FontSize(RRPanelScaleFont(9));
     y = (int)MathRound(166 * m_DPIScale);
     if (!LabelCreate(RRTabList, m_LblRRInfo, x, y, right, y + h, "m_LblRRInfo", "平仓比例按初始仓位，未安排比例继续保留。")) return false;
     y += (int)MathRound(21 * m_DPIScale);
     if (!LabelCreate(RRTabList, m_LblRRBEInfo, x, y, right, y + h, "m_LblRRBEInfo", "BE = 目标触发时把止损移至开仓价。")) return false;
     y += (int)MathRound(21 * m_DPIScale);
     if (!LabelCreate(RRTabList, m_LblRRPositionInfo, x, y, right, y + h, "m_LblRRPositionInfo", "价格为新单预览；持仓使用实际成交价。")) return false;
-    m_LblRRMode.FontSize(9);
-    m_LblRRInfo.FontSize(9);
-    m_LblRRBEInfo.FontSize(9);
-    m_LblRRPositionInfo.FontSize(9);
+    m_LblRRMode.FontSize(RRPanelScaleFont(9));
+    m_LblRRInfo.FontSize(RRPanelScaleFont(9));
+    m_LblRRBEInfo.FontSize(RRPanelScaleFont(9));
+    m_LblRRPositionInfo.FontSize(RRPanelScaleFont(9));
     y = (int)MathRound(232 * m_DPIScale);
     int r_x = x + (int)MathRound(29 * m_DPIScale);
     int p_x = x + (int)MathRound(105 * m_DPIScale);
@@ -46,9 +46,9 @@ bool CPositionSizeCalculator::CreateRRControls()
     if (!LabelCreate(RRTabList, m_LblRRHeadingR, r_x, y, r_x + edit_w, y + h, "m_LblRRHeadingR", "目标 (R)")) return false;
     if (!LabelCreate(RRTabList, m_LblRRHeadingPercent, p_x, y, p_x + edit_w, y + h, "m_LblRRHeadingPercent", "平仓 (%)")) return false;
     if (!LabelCreate(RRTabList, m_LblRRHeadingBE, b_x, y, d_x, y + h, "m_LblRRHeadingBE", "BreakEven")) return false;
-    m_LblRRHeadingR.FontSize(9);
-    m_LblRRHeadingPercent.FontSize(9);
-    m_LblRRHeadingBE.FontSize(9);
+    m_LblRRHeadingR.FontSize(RRPanelScaleFont(9));
+    m_LblRRHeadingPercent.FontSize(RRPanelScaleFont(9));
+    m_LblRRHeadingBE.FontSize(RRPanelScaleFont(9));
     for (int row = 0; row < 5; row++)
     {
         y = (int)MathRound((258 + row * 44) * m_DPIScale);
@@ -62,28 +62,28 @@ bool CPositionSizeCalculator::CreateRRControls()
         if (!LabelCreate(RRTabList, m_LblRRPrice[row], r_x, price_y, right, price_y + h, "m_LblRRPrice" + suffix, "")) return false;
         m_EdtRRMultiple[row].TextAlign(ALIGN_RIGHT);
         m_EdtRRPercent[row].TextAlign(ALIGN_RIGHT);
-        m_BtnRRDelete[row].FontSize(9);
-        m_LblRRPrice[row].FontSize(9);
+        m_BtnRRDelete[row].FontSize(RRPanelScaleFont(9));
+        m_LblRRPrice[row].FontSize(RRPanelScaleFont(9));
     }
     y = (int)MathRound(482 * m_DPIScale);
     if (!ButtonCreate(RRTabList, m_BtnRRPrevious, x, y, x + (int)MathRound(52 * m_DPIScale), y + h, "m_BtnRRPrevious", "上一页")) return false;
     if (!LabelCreate(RRTabList, m_LblRRPage, x + (int)MathRound(59 * m_DPIScale), y, x + (int)MathRound(138 * m_DPIScale), y + h, "m_LblRRPage", "")) return false;
     if (!ButtonCreate(RRTabList, m_BtnRRNext, x + (int)MathRound(139 * m_DPIScale), y, x + (int)MathRound(191 * m_DPIScale), y + h, "m_BtnRRNext", "下一页")) return false;
     if (!ButtonCreate(RRTabList, m_BtnRRAdd, x + (int)MathRound(203 * m_DPIScale), y, right, y + h, "m_BtnRRAdd", "+ 添加止盈")) return false;
-    m_BtnRRPrevious.FontSize(9);
-    m_BtnRRNext.FontSize(9);
-    m_LblRRPage.FontSize(9);
+    m_BtnRRPrevious.FontSize(RRPanelScaleFont(9));
+    m_BtnRRNext.FontSize(RRPanelScaleFont(9));
+    m_LblRRPage.FontSize(RRPanelScaleFont(9));
     y = (int)MathRound(511 * m_DPIScale);
     if (!ButtonCreate(RRTabList, m_BtnRRSave, x, y, x + (int)MathRound(151 * m_DPIScale), y + h, "m_BtnRRSave", "保存新仓方案")) return false;
     if (!ButtonCreate(RRTabList, m_BtnRRReset, x + (int)MathRound(160 * m_DPIScale), y, right, y + h, "m_BtnRRReset", "撤销未保存修改")) return false;
-    m_BtnRRSave.FontSize(9);
-    m_BtnRRReset.FontSize(9);
+    m_BtnRRSave.FontSize(RRPanelScaleFont(9));
+    m_BtnRRReset.FontSize(RRPanelScaleFont(9));
     y = (int)MathRound(540 * m_DPIScale);
     if (!LabelCreate(RRTabList, m_LblRRStatus, x, y, right, y + h, "m_LblRRStatus", "")) return false;
     y += (int)MathRound(21 * m_DPIScale);
     if (!LabelCreate(RRTabList, m_LblRRStatus2, x, y, right, y + h, "m_LblRRStatus2", "")) return false;
-    m_LblRRStatus.FontSize(9);
-    m_LblRRStatus2.FontSize(9);
+    m_LblRRStatus.FontSize(RRPanelScaleFont(9));
+    m_LblRRStatus2.FontSize(RRPanelScaleFont(9));
     LoadRRDraft();
     SetRRStatus("已载入已保存方案，可添加最多 20 个目标。");
     return true;
@@ -151,29 +151,73 @@ bool CPositionSizeCalculator::OnMouseEvent(const int x, const int y, const int f
     return OnEvent(CHARTEVENT_MOUSE_MOVE, mouse_x, mouse_y, mouse_flags);
 }
 
-// Native object priority complements ChartEvent's internal mouse routing.
-// Keep the expanded combo above covered panel controls as well as TP lines.
-// Strip our own band first so opening/closing and refreshes never accumulate it.
-void CPositionSizeCalculator::RaiseRRPanelPriority()
+// Native CDragWnd uses an empty name and ID -1 while moving a dialog. Accept
+// that notification only when it belongs to this dialog's actual drag object.
+bool CPositionSizeCalculator::RRPanelDragEvent(const int id, const long lparam, const string sparam)
 {
-    string prefix = Name();
-    if (StringLen(prefix) == 0) return;
-    const long panel_priority = 1000000;
-    const long popup_priority = 2000000;
-    string combo_prefix = prefix + "m_CmbRRPosition";
-    bool expanded = m_CmbRRPosition.Expanded();
-    int total = ObjectsTotal(m_chart_id);
-    for (int i = 0; i < total; i++)
+    if (id != CHARTEVENT_CUSTOM + ON_DRAG_PROCESS && id != CHARTEVENT_CUSTOM + ON_DRAG_END) return false;
+    if (CheckPointer(m_drag_object) == POINTER_INVALID) return false;
+    return lparam == m_drag_object.Id() && sparam == m_drag_object.Name();
+}
+
+// The native control can recreate a manually deleted object with default
+// priority. Restore only that object's cached value, without scanning charts.
+void CPositionSizeCalculator::RefreshRRPanelObjectPriority(const string object_name)
+{
+    if (StringLen(Name()) == 0 || StringFind(object_name, Name()) != 0) return;
+    CWnd *control = RRScaleFindControl(GetPointer(this), object_name);
+    if (control == NULL && m_OutsideTradeButton.Name() == object_name)
+        control = GetPointer(m_OutsideTradeButton);
+    CWndObj *object = dynamic_cast<CWndObj *>(control);
+    if (object == NULL) return;
+    long priority = object.ZOrder();
+    if (ObjectSetInteger(m_chart_id, object_name, OBJPROP_ZORDER, priority)) return;
+    // Invalidate the band if restoration failed, so the next pass retries.
+    if (priority >= 2000000) object.ZOrder(priority - 2000000);
+    else if (priority >= 1000000) object.ZOrder(priority - 1000000);
+}
+
+// Keep priority maintenance inside the native control tree. Enumerating chart
+// objects and reading their properties here used to force hundreds of chart
+// queue round trips on every tick and every queued control notification.
+void CPositionSizeCalculator::RaiseRRControlPriority(CWnd *control, const bool expanded)
+{
+    if (control == NULL) return;
+    CWndObj *object = dynamic_cast<CWndObj *>(control);
+    if (object != NULL && StringLen(object.Name()) != 0)
     {
-        string object_name = ObjectName(m_chart_id, i);
-        if (StringFind(object_name, prefix) != 0) continue;
-        long priority = ObjectGetInteger(m_chart_id, object_name, OBJPROP_ZORDER);
+        const long panel_priority = 1000000;
+        const long popup_priority = 2000000;
+        long priority = object.ZOrder(); // Cached native-control value; no chart read.
         long relative = priority;
         if (relative >= popup_priority) relative -= popup_priority;
         else if (relative >= panel_priority) relative -= panel_priority;
-        long desired = (expanded && StringFind(object_name, combo_prefix) == 0 ? popup_priority : panel_priority) + relative;
-        if (priority != desired) ObjectSetInteger(m_chart_id, object_name, OBJPROP_ZORDER, desired);
+        bool popup = expanded && StringFind(object.Name(), Name() + "m_CmbRRPosition") == 0;
+        long desired = (popup ? popup_priority : panel_priority) + relative;
+        if (priority != desired)
+        {
+            // Edit and bitmap controls apply ZOrder themselves. Other standard
+            // controls only cache it, so apply their native object once here.
+            bool applied = object.ZOrder(desired);
+            if (applied && dynamic_cast<CEdit *>(control) == NULL && dynamic_cast<CBmpButton *>(control) == NULL)
+                applied = ObjectSetInteger(m_chart_id, object.Name(), OBJPROP_ZORDER, desired);
+            if (!applied) object.ZOrder(priority); // Retry on the next pass.
+        }
     }
+    CWndContainer *container = dynamic_cast<CWndContainer *>(control);
+    if (container == NULL) return;
+    for (int i = 0; i < container.ControlsTotal(); i++)
+        RaiseRRControlPriority(container.Control(i), expanded);
+}
+
+void CPositionSizeCalculator::RaiseRRPanelPriority()
+{
+    if (StringLen(Name()) == 0) return;
+    bool expanded = m_CmbRRPosition.Expanded();
+    RaiseRRControlPriority(GetPointer(this), expanded);
+    // The optional line-entry button deliberately lives outside the dialog tree.
+    if (StringFind(m_OutsideTradeButton.Name(), Name()) == 0)
+        RaiseRRControlPriority(GetPointer(m_OutsideTradeButton), false);
 }
 
 void CPositionSizeCalculator::FocusRRTargetLines()

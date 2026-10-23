@@ -65,6 +65,7 @@ function fixture() {
         ALIGN_RIGHT: 1, ALIGN_LEFT: 0, OBJPROP_TOOLTIP: 1, clrFireBrick: 'error', clrDarkSlateGray: 'normal',
         NULL: null, POINTER_INVALID: 'invalid', CONTROLS_BUTTON_COLOR_DISABLE: 0, CONTROLS_BUTTON_COLOR_ENABLE: 1,
         parseNumber, structuredClone, MathRound: Math.round, MathMax: Math.max,
+        RRPanelScaleFont: points => Math.max(6, Math.round(points * s.m_DPIScale)),
         DoubleToString: (v, digits) => v.toFixed(digits),
         CountDecimalPlaces: v => { for (let i = 0; i < 100; i++) if (Math.abs(Math.round(v * 10 ** i) / 10 ** i - v) < 1e-8) return i; return -1; },
         StringSubstr: (v, start, length) => v.substr(start, length),
@@ -223,7 +224,7 @@ check('guard controls stay within the existing content width and row actions do 
 });
 check('seven actual tab definitions retain legible fonts and disjoint button rectangles', () => {
     const body = panelSource.slice(panelSource.indexOf('    PersistentList = new CPanelList;'), panelSource.indexOf('// Main', panelSource.indexOf('    PersistentList = new CPanelList;')));
-    for (const scale of [1, 1.25, 1.5, 1.75, 2]) {
+    for (const scale of [0.75, 1, 1.25, 1.5, 1.75, 2]) {
         const s = fixture(); Object.assign(s, { PanelList, m_DPIScale: scale, first_column_start: Math.round(7 * scale), y: 8,
             TRANSLATION_TAB_BUTTON_RISK: '风险', TRANSLATION_TAB_BUTTON_MARGIN: '保证金', TRANSLATION_TAB_BUTTON_SWAPS: '掉期', TRANSLATION_TAB_BUTTON_TRADING: '交易' });
         for (const tab of ['Main', 'Risk', 'Margin', 'Swaps', 'Trading', 'RR']) s['m_BtnTab' + tab] = new Control();
@@ -231,7 +232,7 @@ check('seven actual tab definitions retain legible fonts and disjoint button rec
         for (const tab of ['Main', 'Risk', 'Margin', 'Swaps', 'Trading', 'RR']) s[tab + 'TabList'] = null;
         vm.runInContext(`function createTabs() {${adapt(body).replace(/new CPanelList/g, 'new PanelList()')}} createTabs();`, s);
         const tabs = s.PersistentList.nodes.map(node => node.Obj); assert.equal(tabs.length, 7);
-        assert.ok(tabs.every(tab => tab.fontSize >= 9));
+        assert.ok(tabs.every(tab => tab.fontSize === Math.max(6, Math.round(9 * scale))));
         assert.ok(tabs.at(-1).rect[2] <= s.first_column_start + Math.round(307 * scale), `DPI ${scale}`);
         for (let i = 1; i < tabs.length; i++) assert.ok(tabs[i - 1].rect[2] < tabs[i].rect[0]);
     }

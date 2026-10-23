@@ -65,6 +65,7 @@ function fixture(scale = 1, savedIntervalMilliseconds = 1000) {
         RCCloseOpposite: false, RCReversePending: false, RCPendingStatus: '',
         ALIGN_LEFT: 0, OBJPROP_FONTSIZE: 1, OBJPROP_TOOLTIP: 2, NULL: null, clrFireBrick: 'error', clrDarkSlateGray: 'normal',
         MathRound: Math.round, ClientAreaTop: () => 24, ChartID: () => 1, GetTickCount64: () => s.tick,
+        RRPanelScaleFont: points => Math.max(6, Math.round(points * scale)),
         ObjectSetInteger: () => {}, ObjectSetString: (_, name, prop, value) => s.tooltips.set(name, value),
         StringSubstr: (s, from, length) => s.substr(from, length), tooltips: new Map(),
         optionCalls: [], cancelCalls: 0, allowOption: true,
@@ -129,7 +130,7 @@ check('trade-control creation leaves original calculator rows and their position
     for (const row of s.MainTabList.nodes) assert.deepEqual(row.Obj.rect, [7, 69, 310, 89]);
 });
 check('reverse controls fit the panel at standard and fractional DPI', () => {
-    for (const scale of [1, 1.25, 1.5, 2]) {
+    for (const scale of [0.75, 1, 1.25, 1.5, 1.75, 2]) {
         const s = fixture(scale); const right = s.first_column_start + Math.round(307 * scale);
         for (const name of ['m_ChkCloseOpposite', 'm_LblReverseStatus', 'm_BtnCancelReverse'])
             assert.ok(s[name].rect[0] >= s.first_column_start && s[name].rect[2] <= right, `${name} ${scale}`);
@@ -274,14 +275,14 @@ check('trade subpages preserve edits and keep trade action while hiding irreleva
     s.OnClickTradeRegularPage(); assert.equal(s.m_EdtBatchLots.Text(), '3..'); assert.equal(s.m_ChkBatchEnabled.visible, false);
     assert.equal(s.m_BtnTradeRegularPage.background, 'active'); assert.equal(s.m_BtnTrade.visible, true);
 });
-check('real trading layout stays compact on both subpages at 100 to 200 percent DPI', () => {
-    for (const scale of [1, 1.25, 1.5, 2]) {
+check('real trading layout stays compact on both subpages at 75 to 200 percent scale', () => {
+    for (const scale of [0.75, 1, 1.25, 1.5, 1.75, 2]) {
         const s = fixture(scale); const ordinaryHeight = s.height;
         assert.equal(ordinaryHeight, 24 + Math.round(450 * scale) + 5 * Math.round(24 * scale));
-        assert.ok(ordinaryHeight <= 600 * scale, String(scale));
+        assert.ok(ordinaryHeight <= 24 + 576 * scale, String(scale));
         s.OnClickTradeBatchPage(); const batchHeight = s.height;
-        assert.equal(batchHeight, 24 + Math.round(42 * scale) + 10 * Math.round(24 * scale));
-        assert.ok(batchHeight <= 310 * scale, String(scale));
+        assert.equal(batchHeight, 24 + Math.round(68 * scale) + 10 * Math.round(24 * scale));
+        assert.ok(batchHeight <= 24 + 312 * scale, String(scale));
         assert.ok(s.m_BtnTradeRegularPage.rect[3] < s.m_BtnTrade.rect[1]);
         assert.ok(s.m_BtnTrade.rect[3] < s.m_ChkBatchEnabled.rect[1]);
         assert.ok(s.m_LblBatchStatus3.rect[3] < s.m_LblURL.Top());
@@ -294,7 +295,7 @@ check('subpage visibility honors newly inserted TP controls and historical hidde
     s.TradingTabList.nodes.push({ Name: 'm_EdtTradingTPEdit2', Obj: dynamic, Hidden: false }, { Name: 'm_EdtTradingTPEdit3', Obj: removed, Hidden: true });
     // Dynamic TP insertion may shift every later node; layout restores subpage anchors.
     s.m_BtnTradeBatchPage.Move(s.m_BtnTradeBatchPage.Left(), 999); s.MoveAndResize();
-    assert.equal(dynamic.visible, false); assert.equal(removed.visible, false); assert.equal(s.m_BtnTradeBatchPage.Top(), 66);
+    assert.equal(dynamic.visible, false); assert.equal(removed.visible, false); assert.equal(s.m_BtnTradeBatchPage.Top(), 92);
     s.OnClickTradeRegularPage(); assert.equal(dynamic.visible, true); assert.equal(removed.visible, false);
     s.sets.SelectedTab = 0; s.RefreshTradingSubpage(); assert.ok(s.TradingTabList.nodes.every(n => !n.Obj.visible));
     s.sets.SelectedTab = 4; s.m_minimized = true; s.RefreshTradingSubpage(); assert.ok(s.TradingTabList.nodes.every(n => !n.Obj.visible));

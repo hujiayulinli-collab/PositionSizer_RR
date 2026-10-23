@@ -121,6 +121,12 @@ private:
     ulong            m_guard_last_refresh;
     string           m_guard_account_key;
 
+    CButton          m_BtnScaleDown, m_BtnScaleReset, m_BtnScaleUp;
+    CLabel           m_LblScale;
+    bool             CreatePanelScaleControls();
+    void             OnClickScaleDown() {RRPanelScaleRequest(RRPanelScalePercent - 25);}
+    void             OnClickScaleReset() {RRPanelScaleRequest(100);}
+    void             OnClickScaleUp() {RRPanelScaleRequest(RRPanelScalePercent + 25);}
     string           m_FileName;
     double           m_DPIScale;
     bool             m_controls_ready; // Base Create() can call virtual layout methods before our controls exist.
@@ -148,6 +154,10 @@ public:
     CPositionSizeCalculator(void);
    ~CPositionSizeCalculator(void);
 
+            void     PrepareScaleDraft();
+            void     CopyScaleDraftFrom(CPositionSizeCalculator &source);
+            bool     RunForScale();
+            void     KeepScaleControlsReachable();
             void     UpdateFileName();
             void     InitVariables();
     virtual void     Destroy();
@@ -187,7 +197,7 @@ public:
     // Keep layout files independent of the display caption/version and unique
     // per chart. Display captions are not safe filesystem paths.
     virtual string   IniFileName(void) const {return "PSRR_Settings\\Panel_" + IntegerToString(ChartID());}
-    virtual void     IniFileLoad() {if (FileIsExist(ExtDialog.IniFileName() + ExtDialog.IniFileExt())) CAppDialog::IniFileLoad(); InitObjects();} // Need to init objects after ini file load.
+    virtual void     IniFileLoad() {if (FileIsExist(ExtDialog.IniFileName() + ExtDialog.IniFileExt())) CAppDialog::IniFileLoad(); if (!m_minimized) Width((int)MathRound(PanelWidth * m_DPIScale)); else m_norm_rect.right = m_norm_rect.left + (int)MathRound(PanelWidth * m_DPIScale); InitObjects(); KeepScaleControlsReachable();} // Need to init objects after ini file load.
     virtual void     EmulateMinMaxClick();
     virtual void     ResetChkTPLockedOnSL();
             void     OnClickBtnTakeProfitsNumberAdd();
@@ -220,10 +230,12 @@ public:
     CEdit            AdditionalTPEdits[];
     CButton          m_OutsideTradeButton;
             void     MoveOutsideTradeButton();
-            double   DPIScale() {return m_DPIScale;}
+            double   DPIScale() {return (double)TerminalInfoInteger(TERMINAL_SCREEN_DPI) / 96.0;} // Chart labels use system DPI, not panel zoom.
             void     RefreshRRLiveStatus(); // Refreshes live labels without replacing the edit draft.
             void     NotifyRRTargetMoved(const ulong id, const bool parent, const bool saved, const string message);
             void     FocusRRTargetLines();
+            bool     RRPanelDragEvent(const int id, const long lparam, const string sparam);
+            void     RefreshRRPanelObjectPriority(const string object_name);
             void     RefreshGuardLiveStatus();
             void     RefreshTradeControlStatus();
             // Remember the panel's location to have the same location for minimized and maximized states.
@@ -257,6 +269,7 @@ private:
     void             LayoutTradingSubpage();
     void             FillRRDraft(const RRPlan &plan);
     void             RaiseRRPanelPriority();
+    void             RaiseRRControlPriority(CWnd *control, const bool expanded);
     bool             ReadRRDraftMultiple(const int index, const string text, double &multiple);
     void             CaptureRRPage();
     void             RenderRRPage();
@@ -384,12 +397,16 @@ private:
     void OnClickBtnQuickRisk2();
 };
 
+#include "RRPanelScaleUI.mqh"
 #include "RRPlanPanel.mqh"
 #include "RRGuardPanel.mqh"
 #include "RRTradePanel.mqh"
 
 // Event Map
 EVENT_MAP_BEGIN(CPositionSizeCalculator)
+ON_EVENT(ON_CLICK, m_BtnScaleDown, OnClickScaleDown)
+ON_EVENT(ON_CLICK, m_BtnScaleReset, OnClickScaleReset)
+ON_EVENT(ON_CLICK, m_BtnScaleUp, OnClickScaleUp)
 ON_EVENT(ON_CLICK, m_BtnTabGuard, OnClickBtnTabGuard)
 ON_EVENT(ON_CLICK, m_BtnGuardScope, OnClickBtnGuardScope)
 ON_EVENT(ON_CLICK, m_BtnGuardSave, OnClickBtnGuardSave)
@@ -570,6 +587,7 @@ void CPositionSizeCalculator::InitVariables()
 {
     m_controls_ready = false;
     NoPanelMaximization = false;
+    ATR_handle = INVALID_HANDLE;
     m_rr_page = 0;
     m_rr_count = 0;
     m_rr_visible = false;
@@ -747,9 +765,9 @@ bool CPositionSizeCalculator::Create(const long chart, const string name, const 
 {
     m_controls_ready = false;
     double screen_dpi = (double)TerminalInfoInteger(TERMINAL_SCREEN_DPI);
-    m_DPIScale = screen_dpi / 96.0;
+    m_DPIScale = screen_dpi / 96.0 * RRPanelScalePercent / 100.0;
 
-    if (m_DPIScale <= 1)
+    if (screen_dpi / 96.0 <= 1)
     {
         if (DetectedColorMode)
         {
@@ -759,7 +777,7 @@ bool CPositionSizeCalculator::Create(const long chart, const string name, const 
             RadiogroupOffFile = "RadioButtonOffDark.bmp";
         }
     }
-    else if (m_DPIScale >= 1.5)
+    else if (screen_dpi / 96.0 >= 1.5)
     {
         if (DetectedColorMode)
         {
@@ -791,6 +809,7 @@ bool CPositionSizeCalculator::Create(const long chart, const string name, const 
         return false;
     }
     if (sets.TakeProfitsNumber > MaxTakeProfitsNumber) MaxTakeProfitsNumber = sets.TakeProfitsNumber;
+    RRScalePanelBitmaps(GetPointer(this));
     return true;
 }
 
@@ -902,31 +921,31 @@ bool CPositionSizeCalculator::CreateObjects()
     // Round absolute edges so fractional DPI does not accumulate rounding drift.
     int rr_tab_x = first_column_start;
     if (!ButtonCreate(PersistentList, m_BtnTabMain, rr_tab_x, y, first_column_start + (int)MathRound(33 * m_DPIScale), y + element_height, "m_BtnTabMain", "主页")) return false;
-    m_BtnTabMain.FontSize(9);
+    m_BtnTabMain.FontSize(RRPanelScaleFont(9));
     rr_tab_x = first_column_start + (int)MathRound(36 * m_DPIScale);
     MainTabList = new CPanelList;
     if (!ButtonCreate(PersistentList, m_BtnTabRisk, rr_tab_x, y, first_column_start + (int)MathRound(69 * m_DPIScale), y + element_height, "m_BtnTabRisk", TRANSLATION_TAB_BUTTON_RISK)) return false;
-    m_BtnTabRisk.FontSize(9);
+    m_BtnTabRisk.FontSize(RRPanelScaleFont(9));
     rr_tab_x = first_column_start + (int)MathRound(72 * m_DPIScale);
     RiskTabList = new CPanelList;
     if (!ButtonCreate(PersistentList, m_BtnTabMargin, rr_tab_x, y, first_column_start + (int)MathRound(115 * m_DPIScale), y + element_height, "m_BtnTabMargin", TRANSLATION_TAB_BUTTON_MARGIN)) return false;
-    m_BtnTabMargin.FontSize(9);
+    m_BtnTabMargin.FontSize(RRPanelScaleFont(9));
     rr_tab_x = first_column_start + (int)MathRound(118 * m_DPIScale);
     MarginTabList = new CPanelList;
     if (!ButtonCreate(PersistentList, m_BtnTabSwaps, rr_tab_x, y, first_column_start + (int)MathRound(151 * m_DPIScale), y + element_height, "m_BtnTabSwaps", TRANSLATION_TAB_BUTTON_SWAPS)) return false;
-    m_BtnTabSwaps.FontSize(9);
+    m_BtnTabSwaps.FontSize(RRPanelScaleFont(9));
     rr_tab_x = first_column_start + (int)MathRound(154 * m_DPIScale);
     SwapsTabList = new CPanelList;
     if (!ButtonCreate(PersistentList, m_BtnTabTrading, rr_tab_x, y, first_column_start + (int)MathRound(187 * m_DPIScale), y + element_height, "m_BtnTabTrading", TRANSLATION_TAB_BUTTON_TRADING)) return false;
-    m_BtnTabTrading.FontSize(9);
+    m_BtnTabTrading.FontSize(RRPanelScaleFont(9));
     rr_tab_x = first_column_start + (int)MathRound(190 * m_DPIScale);
     TradingTabList = new CPanelList;
     if (!ButtonCreate(PersistentList, m_BtnTabRR, rr_tab_x, y, first_column_start + (int)MathRound(246 * m_DPIScale), y + element_height, "m_BtnTabRR", "分仓止盈")) return false;
-    m_BtnTabRR.FontSize(9);
+    m_BtnTabRR.FontSize(RRPanelScaleFont(9));
     rr_tab_x = first_column_start + (int)MathRound(249 * m_DPIScale);
     RRTabList = new CPanelList;
     if (!ButtonCreate(PersistentList, m_BtnTabGuard, rr_tab_x, y, first_column_start + (int)MathRound(305 * m_DPIScale), y + element_height, "m_BtnTabGuard", "亏损保护")) return false;
-    m_BtnTabGuard.FontSize(9);
+    m_BtnTabGuard.FontSize(RRPanelScaleFont(9));
     GuardTabList = new CPanelList;
 
 // Main
@@ -1160,7 +1179,7 @@ bool CPositionSizeCalculator::CreateObjects()
 
     // EarnForex URL
     if (!LabelCreate(MainTabList, m_LblURL, first_column_start, y, first_column_start + normal_label_width, y + element_height, "m_LblURL", "www.earnforex.com"))                                         return false;
-    m_LblURL.FontSize(8);
+    m_LblURL.FontSize(RRPanelScaleFont(8));
     m_LblURL.Color(C'0,115,66'); // Green
 
 // Portfolio Risk
@@ -1599,6 +1618,7 @@ bool CPositionSizeCalculator::CreateObjects()
     if (!CreateRRControls()) return false;
     if (!CreateGuardControls()) return false;
     if (!CreateTradeControlOptions()) return false;
+    if (!CreatePanelScaleControls()) return false;
 
     // All tab lists and controls now exist. InitObjects() may itself cause
     // layout callbacks, so enable those callbacks before initializing values.
@@ -2412,7 +2432,7 @@ void CPositionSizeCalculator::Minimize()
         Move(remember_left, remember_top);
         m_min_rect.Move(remember_left, remember_top);
     }
-    IniFileSave();
+    if (!RRPanelScaleBuilding) IniFileSave();
 }
 
 void CPositionSizeCalculator::Maximize()
@@ -2450,6 +2470,7 @@ void CPositionSizeCalculator::Maximize()
 
     MoveAndResize();
     if (remember_left != -1) Move(remember_left, remember_top);
+    KeepScaleControlsReachable();
 }
 
 void CPositionSizeCalculator::CalculateSettingsBasedOnLines()

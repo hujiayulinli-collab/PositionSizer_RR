@@ -6,8 +6,8 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-expert-advisors/Position-Sizer/"
 #property icon      "EF-Icon-64x64px.ico"
-#property version   "1.804" // Public v1.8.4 in MT5's two-part version format.
-string    Version = "1.8.4";
+#property version   "1.805" // Public release v1.8.5; MT5 uses a two-part file version.
+string    Version = "1.8.5";
 
 //#include "Translations\English.mqh"
 //#include "Translations\Arabic.mqh"
@@ -218,8 +218,23 @@ int Mouse_Last_X = 0, Mouse_Last_Y = 0; // For SL/TP hotkeys.
 color LongButtonColorAdjusted, ShortButtonColorAdjusted, TradeButtonColorAdjusted; // Based on the DarkMode setting.
 bool DetectedColorMode;
 
+// Read-only slow-operation diagnostics, rate limited independently per path.
+ulong RRSlowUILastLog[3];
+void RRReportSlowUI(const int slot, const string operation, const ulong started)
+{
+    if (slot < 0 || slot >= 3) return;
+    ulong now = GetTickCount64();
+    if (now < started || now - started < 250) return;
+    if (RRSlowUILastLog[slot] != 0 && now >= RRSlowUILastLog[slot] && now - RRSlowUILastLog[slot] < 30000) return;
+    RRSlowUILastLog[slot] = now;
+    PrintFormat("[PS RR Perf] %s 耗时 %I64u ms；版本 %s，品种 %s，缩放 %d%%。", operation, now - started, Version, _Symbol, RRPanelScalePercent);
+}
+#include "RRPanelScaleRuntime.mqh"
+
 int OnInit()
 {
+    ulong init_started = GetTickCount64();
+    ulong panel_started = 0, panel_elapsed = 0;
     RRDeleteTargetLines();
     RGDeleteStatus();
     RRPanelInitSucceeded = false;
@@ -280,6 +295,7 @@ int OnInit()
     
     TickSize = -1;
 
+    if (DeinitializationReason != REASON_CHARTCHANGE) RRPanelScaleLoad();
     if (DeinitializationReason != REASON_CHARTCHANGE) ExtDialog = new CPositionSizeCalculator; // Create the panel only if it is not a symbol/timeframe change.
     else OldTakeProfitsNumber = sets.TakeProfitsNumber; // Will be used to resize the panel if needed when switching symbols in some modes.
     if (CheckPointer(ExtDialog) != POINTER_DYNAMIC)
@@ -435,6 +451,7 @@ int OnInit()
 
     if (DeinitializationReason != REASON_CHARTCHANGE)
     {
+        panel_started = GetTickCount64();
         if (!ExtDialog.Create(0, "Position Sizer RR (ver. " + Version + ")", 0, DefaultPanelPositionX, DefaultPanelPositionY))
         {
             PrintFormat("[PS RR] 面板创建失败，错误 %d；将清理未完成的面板。", GetLastError());
@@ -445,6 +462,8 @@ int OnInit()
             PrintFormat("[PS RR] 面板事件启动失败，错误 %d；将清理面板。", GetLastError());
             return INIT_FAILED;
         }
+
+        panel_elapsed = GetTickCount64() - panel_started;
 
         // No ini file - move the panel according to the inputs.
         if (!FileIsExist(ExtDialog.IniFileName() + ExtDialog.IniFileExt()))
@@ -561,76 +580,7 @@ int OnInit()
     
     if (ShowATROptions) ExtDialog.InitATR();
 
-    if (DetectedColorMode)
-    {
-        int total = ObjectsTotal(ChartID());
-        for (int i = 0; i < total; i++)
-        {
-            string obj_name = ObjectName(ChartID(), i);
-            if (StringSubstr(obj_name, 0, StringLen(ExtDialog.Name())) != ExtDialog.Name()) continue; // Skip non-panel objects.
-            if (obj_name == ExtDialog.Name() + "Back")
-            {
-                
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BGCOLOR, DARKMODE_BG_DARK_COLOR);
-            }
-            if (obj_name == ExtDialog.Name() + "Caption")
-            {
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BGCOLOR, DARKMODE_BG_DARK_COLOR);
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_COLOR, DARKMODE_CONTROL_BRODER_COLOR);
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BORDER_COLOR, DARKMODE_BG_DARK_COLOR);
-            }
-            else if (obj_name == ExtDialog.Name() + "ClientBack")
-            {
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_COLOR, DARKMODE_MAIN_AREA_BORDER_COLOR);
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BGCOLOR, DARKMODE_MAIN_AREA_BG_COLOR);
-            }
-            else if (obj_name == ExtDialog.Name() + "m_BtnEntry") // Long/Short
-            {
-                if (sets.TradeDirection == Long)
-                {
-                    ObjectSetInteger(ChartID(), obj_name, OBJPROP_BGCOLOR, LongButtonColorAdjusted);
-                }
-                else if (sets.TradeDirection == Short)
-                {
-                    ObjectSetInteger(ChartID(), obj_name, OBJPROP_BGCOLOR, ShortButtonColorAdjusted);
-                }
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BORDER_COLOR, DARKMODE_CONTROL_BRODER_COLOR);
-            }
-            else if ((obj_name == ExtDialog.Name() + "m_BtnMainTrade") || (obj_name == ExtDialog.Name() + "m_BtnTrade") || (obj_name == ExtDialog.Name() + "m_OutsideTradeButton")) // Any of the Trade buttons (Main tab, Trading tab, outside).
-            {
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BGCOLOR, TradeButtonColorAdjusted);
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BORDER_COLOR, DARKMODE_CONTROL_BRODER_COLOR);
-            }
-            else if (StringSubstr(obj_name, 0, StringLen(ExtDialog.Name() + "m_Edt")) == ExtDialog.Name() + "m_Edt")
-            {
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BGCOLOR, DARKMODE_EDIT_BG_COLOR);
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BORDER_COLOR, DARKMODE_CONTROL_BRODER_COLOR);
-            }
-            else if (StringSubstr(obj_name, 0, StringLen(ExtDialog.Name() + "m_Btn")) == ExtDialog.Name() + "m_Btn")
-            {
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BGCOLOR, DARKMODE_BUTTON_BG_COLOR);
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BORDER_COLOR, DARKMODE_CONTROL_BRODER_COLOR);
-            }
-            else if (StringSubstr(obj_name, 0, StringLen(ExtDialog.Name() + "m_Chk")) == ExtDialog.Name() + "m_Chk")
-            {
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_COLOR, DARKMODE_TEXT_COLOR);
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BGCOLOR, DARKMODE_MAIN_AREA_BG_COLOR);
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BORDER_COLOR, DARKMODE_MAIN_AREA_BG_COLOR);
-            }
-            else if (StringSubstr(obj_name, 0, StringLen(ExtDialog.Name() + "m_Rgp")) == ExtDialog.Name() + "m_Rgp")
-            {
-                if (ObjectGetInteger(ChartID(), obj_name, OBJPROP_TYPE) == OBJ_RECTANGLE_LABEL) ObjectSetInteger(ChartID(), obj_name, OBJPROP_COLOR, DARKMODE_MAIN_AREA_BG_COLOR);
-                else ObjectSetInteger(ChartID(), obj_name, OBJPROP_COLOR, DARKMODE_TEXT_COLOR);
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BGCOLOR, DARKMODE_MAIN_AREA_BG_COLOR);
-                ObjectSetInteger(ChartID(), obj_name, OBJPROP_BORDER_COLOR, DARKMODE_MAIN_AREA_BG_COLOR);
-            }
-            else
-            {
-                if (obj_name == ExtDialog.Name() + "m_LblURL") ObjectSetInteger(ChartID(), obj_name, OBJPROP_COLOR, 0x224400);
-                else ObjectSetInteger(ChartID(), obj_name, OBJPROP_COLOR, DARKMODE_TEXT_COLOR);
-            }
-        }
-    }
+    RRApplyPanelTheme(ExtDialog);
 
     // If symbol change with a reset was enacted.
     if (is_InitControlsValues_required) ExtDialog.InitControlsValues();
@@ -638,7 +588,8 @@ int OnInit()
     ExtDialog.RefreshValues();
     RRPanelInitSucceeded = true;
     RRRefreshViews(true);
-    Print("[PS RR] v1.8.4 公开版面板初始化完成。TP直接拖线保存，到价市价执行；请将全部运行图表统一升级，避免旧版回挂服务器TP。");
+    PrintFormat("[PS RR Perf] 初始化总耗时 %I64u ms，其中面板创建/启动 %I64u ms；版本 %s，品种 %s。", GetTickCount64() - init_started, panel_elapsed, Version, _Symbol);
+    Print("[PS RR] v1.8.5 面板初始化完成。TP直接拖线保存，到价市价执行；请将全部运行图表统一升级，避免旧版回挂服务器TP。");
     return INIT_SUCCEEDED;
 }
 
@@ -722,6 +673,7 @@ void OnDeinit(const int reason)
 void OnTick()
 {
     if (!RRPanelInitSucceeded) return;
+    ulong perf_started = GetTickCount64();
     bool normal_exits_allowed = RGManage(sets.MagicNumber);
     RMManage();
     RBManageGroups();
@@ -733,6 +685,7 @@ void OnTick()
     RRRefreshViews();
 
     if ((!RR_Enable) && (!RGEntryBlocked) && (sets.TrailingStopPoints > 0)) DoTrailingStop();
+    RRReportSlowUI(0, "TICK 管理和界面刷新", perf_started);
 }
 
 void OnChartEvent(const int id,
@@ -760,7 +713,11 @@ void OnChartEvent(const int id,
             return;
         }
     }
-    if (id == CHARTEVENT_CHART_CHANGE) RRRefreshViews(true);
+    if (id == CHARTEVENT_CHART_CHANGE)
+    {
+        if (RRPanelInitSucceeded && CheckPointer(ExtDialog) == POINTER_DYNAMIC) ExtDialog.KeepScaleControlsReachable();
+        RRRefreshViews(true);
+    }
     if (id == CHARTEVENT_MOUSE_MOVE)
     {
         Mouse_Last_X = (int)lparam;
@@ -1177,7 +1134,12 @@ void OnTimer()
     ulong now = GetTickCount64();
     // Poll active entry batches at 100 ms even without chart ticks. At idle,
     // retain the one-second management cadence and avoid needless disk scans.
-    if (!RBEntryActive() && RRLastTimerManagement != 0 && now - RRLastTimerManagement < 1000) return;
+    if (!RBEntryActive() && RRLastTimerManagement != 0 && now - RRLastTimerManagement < 1000)
+    {
+        RRApplyPanelScale();
+        RRReportSlowUI(1, "定时管理和界面刷新", now);
+        return;
+    }
     RRLastTimerManagement = now;
     // Risk and exit management must remain ahead of every entry attempt.
     bool normal_exits_allowed = RGManage(sets.MagicNumber);
@@ -1188,31 +1150,57 @@ void OnTimer()
     RCManageReverse();
     if (normal_exits_allowed && !RGEntryBlocked) RRManage("", sets.MagicNumber);
     RDFlushAlerts(sets.MagicNumber);
+    RRApplyPanelScale(); // Rebuild UI only after due risk and trade management.
     // Drawing/recalculation must not delay the next batch check unnecessarily.
-    if (RRLastTimerView != 0 && now - RRLastTimerView < 500) return;
+    if (RRLastTimerView != 0 && now - RRLastTimerView < 500) { RRReportSlowUI(1, "定时管理和界面刷新", now); return; }
     RRLastTimerView = now;
     RRRefreshViews();
     /**
      * Release resource 50ms to prevent freeze
      * when change symbols or close Position Sizer
      * */
-    if (GetTickCount64() - LastRecalculationTime < 50) return; 
+    if (GetTickCount64() - LastRecalculationTime < 50) { RRReportSlowUI(1, "定时管理和界面刷新", now); return; }
     ExtDialog.CheckAndRestoreLines(); // Check if any lines should be restored.
-    if (GetTickCount64() - LastRecalculationTime < 1000) return; // Do not recalculate on timer if less than 1 second passed.
+    if (GetTickCount64() - LastRecalculationTime < 1000) { RRReportSlowUI(1, "定时管理和界面刷新", now); return; } // Do not recalculate on timer if less than 1 second passed.
     ExtDialog.RefreshValues();
     ChartRedraw();
+    RRReportSlowUI(1, "定时管理和界面刷新", now);
 }
 
 // ChartEvent owns mouse focus and ON_BRING_TO_TOP in the standard library.
 // Calling OnEvent directly bypasses popup priority and lets covered controls
 // receive a list-row click. Keep the existing chart-switch minimization guard.
+// Native dialog creation enables chart-wide create/delete notifications. They
+// arrive once per object, so do not turn bulk initialization into bulk redraws.
+bool RRPanelEventRelevant(const int id, const long lparam, const string sparam)
+{
+    if (!RRPanelInitSucceeded || CheckPointer(ExtDialog) != POINTER_DYNAMIC) return false;
+    if (id == CHARTEVENT_CHART_CHANGE || id == CHARTEVENT_OBJECT_CREATE) return false;
+    string prefix = ExtDialog.Name();
+    if (id == CHARTEVENT_OBJECT_DELETE)
+        return StringLen(prefix) > 0 && StringFind(sparam, prefix) == 0;
+    if (id >= CHARTEVENT_CUSTOM && id <= CHARTEVENT_CUSTOM + ON_BRING_TO_TOP)
+    {
+        // Native transient CDragWnd legitimately has ID=-1 and an empty name.
+        if (ExtDialog.RRPanelDragEvent(id, lparam, sparam)) return true;
+        long first_id = ExtDialog.Id();
+        return lparam >= first_id && lparam < first_id + CONTROLS_MAXIMUM_ID
+            && StringLen(prefix) > 0 && StringFind(sparam, prefix) == 0;
+    }
+    return true;
+}
+
 void RRDispatchPanelEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
-    if (id == CHARTEVENT_CHART_CHANGE) return;
+    if (!RRPanelEventRelevant(id, lparam, sparam)) return;
+    ulong started = GetTickCount64();
     ExtDialog.ChartEvent(id, lparam, dparam, sparam);
-    // Opening/closing a list and creating controls arrive as custom events.
+    // Native recovery recreates the graphic but does not restore cached Z-order.
+    if (id == CHARTEVENT_OBJECT_DELETE) ExtDialog.RefreshRRPanelObjectPriority(sparam);
     if (id != CHARTEVENT_MOUSE_MOVE) ExtDialog.FocusRRTargetLines();
-    if (id >= CHARTEVENT_CUSTOM) ChartRedraw();
+    // ChartEvent already redraws handled input. Do not redraw twice, or redraw
+    // for an unhandled custom event left behind by the previous panel.
+    RRReportSlowUI(2, "界面事件", started);
 }
 
 void RRRefreshViews(const bool force = false)

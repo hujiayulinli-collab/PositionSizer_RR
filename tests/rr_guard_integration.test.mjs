@@ -160,6 +160,8 @@ function handlerFixture({ guardAllows = true, initialized = true, rrEnabled = tr
         RRManage: (symbol, magic) => events.push(`rr:${symbol}:${magic}`),
         ExtDialog: { RefreshValues: () => events.push('refresh'), CheckAndRestoreLines: () => events.push('restore-lines') },
         RRRefreshViews: () => events.push('views'), RDFlushAlerts: () => events.push('flush-audio'),
+        RRReportSlowUI: () => {},
+        RRApplyPanelScale: () => {}, // Separate panel-scale tests execute the UI transaction and timer ordering.
         RDOnTransaction: () => events.push('deal-event'), DoTrailingStop: () => events.push('trailing'),
         ChartRedraw: () => events.push('redraw'),
     });

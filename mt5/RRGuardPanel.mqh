@@ -48,12 +48,12 @@ bool CPositionSizeCalculator::CreateGuardControls()
     if (!LabelCreate(GuardTabList, m_LblGuardStatus, x, y, right, y + h, "m_LblGuardStatus", "")) return false;
     y += (int)MathRound(21 * m_DPIScale);
     if (!LabelCreate(GuardTabList, m_LblGuardStatus2, x, y, right, y + h, "m_LblGuardStatus2", "")) return false;
-    m_LblGuardUnit.FontSize(9); m_LblGuardSingle.FontSize(9); m_LblGuardScope.FontSize(9); m_LblGuardDaily.FontSize(9);
-    m_LblGuardDailyInfo.FontSize(9); m_LblGuardDailyInfo2.FontSize(9);
-    m_LblGuardTradeSound.FontSize(9); m_LblGuardLossSound.FontSize(9);
-    m_LblGuardRealized.FontSize(9); m_LblGuardFloating.FontSize(9); m_LblGuardRemaining.FontSize(9);
-    m_LblGuardState.FontSize(9); m_LblGuardState2.FontSize(9); m_LblGuardStatus.FontSize(9); m_LblGuardStatus2.FontSize(9);
-    m_BtnGuardScope.FontSize(9); m_BtnGuardSave.FontSize(9); m_BtnGuardReset.FontSize(9);
+    m_LblGuardUnit.FontSize(RRPanelScaleFont(9)); m_LblGuardSingle.FontSize(RRPanelScaleFont(9)); m_LblGuardScope.FontSize(RRPanelScaleFont(9)); m_LblGuardDaily.FontSize(RRPanelScaleFont(9));
+    m_LblGuardDailyInfo.FontSize(RRPanelScaleFont(9)); m_LblGuardDailyInfo2.FontSize(RRPanelScaleFont(9));
+    m_LblGuardTradeSound.FontSize(RRPanelScaleFont(9)); m_LblGuardLossSound.FontSize(RRPanelScaleFont(9));
+    m_LblGuardRealized.FontSize(RRPanelScaleFont(9)); m_LblGuardFloating.FontSize(RRPanelScaleFont(9)); m_LblGuardRemaining.FontSize(RRPanelScaleFont(9));
+    m_LblGuardState.FontSize(RRPanelScaleFont(9)); m_LblGuardState2.FontSize(RRPanelScaleFont(9)); m_LblGuardStatus.FontSize(RRPanelScaleFont(9)); m_LblGuardStatus2.FontSize(RRPanelScaleFont(9));
+    m_BtnGuardScope.FontSize(RRPanelScaleFont(9)); m_BtnGuardSave.FontSize(RRPanelScaleFont(9)); m_BtnGuardReset.FontSize(RRPanelScaleFont(9));
     m_EdtGuardSingle.TextAlign(ALIGN_RIGHT); m_EdtGuardDaily.TextAlign(ALIGN_RIGHT);
     m_EdtGuardTradeSound.TextAlign(ALIGN_LEFT); m_EdtGuardLossSound.TextAlign(ALIGN_LEFT);
     LoadGuardDraft();

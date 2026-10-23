@@ -3,6 +3,7 @@
 //|                                  Copyright © 2026, EarnForex.com |
 //|                                       https://www.earnforex.com/ |
 //+------------------------------------------------------------------+
+#include "RRPanelScale.mqh"
 #include <Controls\Button.mqh>
 #include <Controls\Dialog.mqh>
 #include <Controls\CheckBox.mqh>

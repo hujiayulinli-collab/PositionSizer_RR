@@ -49,7 +49,7 @@ const listNames = [...tabs.map(tab => `${tab}TabList`), 'PersistentList'];
 function fixture(source = production) {
     const events = [];
     const sandbox = {
-        NULL: null, POINTER_DYNAMIC: 'dynamic', POINTER_INVALID: 'invalid',
+        NULL: null, POINTER_DYNAMIC: 'dynamic', POINTER_INVALID: 'invalid', INVALID_HANDLE: -1,
         CONTROLS_BUTTON_COLOR_DISABLE: 0, CHART_WIDTH_IN_PIXELS: 1, OBJPROP_SELECTED: 2,
         TERMINAL_SCREEN_DPI: 3, ACCOUNT_CURRENCY_DIGITS: 4,
         m_controls_ready: false, m_minimized: false, NoPanelMaximization: false,
@@ -60,12 +60,13 @@ function fixture(source = production) {
         sets: { SelectedTab: 'Main', IsPanelMinimized: false, TakeProfitsNumber: 1 },
         remember_left: -1, remember_top: -1, MaxTakeProfitsNumber: 1, LinesSelectedStatus: 0,
         ChartWidth: 0, CheckboxOnFile: '', CheckboxOffFile: '', RadiogroupOnFile: '', RadiogroupOffFile: '',
-        ObjectPrefix: 'PSRR_', _Digits: 5, DetectedColorMode: false, m_DPIScale: 0, PanelWidth: 0,
+        ObjectPrefix: 'PSRR_', _Digits: 5, DetectedColorMode: false, m_DPIScale: 0, PanelWidth: 0, RRPanelScalePercent: 100, RRPanelScaleBuilding: false,
         failAfterLists: -1, initObjectsSuccess: true,
         ChartGetInteger: () => 800, ChartID: () => 1,
         ObjectGetInteger: () => true, ObjectSetInteger: () => events.push('object-selected'),
         TerminalInfoInteger: () => 96, AccountInfoInteger: () => 2,
         MathRound: Math.round,
+        GetPointer: value => value, RRScalePanelBitmaps: () => {}, KeepScaleControlsReachable: () => {},
         Left: () => 15, Top: () => 20,
         Hide: () => events.push('panel-hide'), Show: () => events.push('panel-show'),
         Move: (...args) => events.push(`move:${args.join(',')}`),
